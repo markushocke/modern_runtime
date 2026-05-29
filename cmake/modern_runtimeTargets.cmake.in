@@ -1,0 +1,105 @@
+if(TARGET modern_runtime::modern_runtime)
+  return()
+endif()
+
+get_filename_component(_IMPORT_PREFIX "${CMAKE_CURRENT_LIST_FILE}" PATH)
+get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
+get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
+get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
+if(_IMPORT_PREFIX STREQUAL "/")
+  set(_IMPORT_PREFIX "")
+endif()
+
+function(_modern_runtime_set_imported_modules target)
+  set_property(TARGET "${target}" PROPERTY IMPORTED_CXX_MODULES_RELWITHDEBINFO ${ARGN})
+  set_property(TARGET "${target}" PROPERTY IMPORTED_CXX_MODULES_DEBUG ${ARGN})
+  set_property(TARGET "${target}" PROPERTY IMPORTED_CXX_MODULES_RELEASE ${ARGN})
+  set_property(TARGET "${target}" PROPERTY IMPORTED_CXX_MODULES_MINSIZEREL ${ARGN})
+  set_property(TARGET "${target}" PROPERTY IMPORTED_CXX_MODULES_NOCONFIG ${ARGN})
+endfunction()
+
+add_library(modern_runtime::modern_runtime STATIC IMPORTED)
+set_target_properties(modern_runtime::modern_runtime PROPERTIES
+  CXX_EXTENSIONS "OFF"
+  IMPORTED_CONFIGURATIONS "RELWITHDEBINFO;DEBUG;RELEASE;MINSIZEREL;NOCONFIG"
+  IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libmodern_runtime.a"
+  IMPORTED_LOCATION_DEBUG "${_IMPORT_PREFIX}/lib/libmodern_runtime.a"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libmodern_runtime.a"
+  IMPORTED_LOCATION_MINSIZEREL "${_IMPORT_PREFIX}/lib/libmodern_runtime.a"
+  IMPORTED_LOCATION_NOCONFIG "${_IMPORT_PREFIX}/lib/libmodern_runtime.a"
+  IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS "@MODERN_RUNTIME_IMPORTED_COMPILE_DEFINITIONS@"
+  IMPORTED_CXX_MODULES_COMPILE_FEATURES "cxx_std_23"
+  IMPORTED_CXX_MODULES_COMPILE_OPTIONS "@MODERN_RUNTIME_IMPORTED_COMPILE_OPTIONS@"
+  IMPORTED_CXX_MODULES_LINK_LIBRARIES "@MODERN_RUNTIME_IMPORTED_LINK_LIBRARIES@"
+  INTERFACE_COMPILE_FEATURES "cxx_std_23"
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/modern_runtime"
+  INTERFACE_LINK_LIBRARIES "@MODERN_RUNTIME_IMPORTED_LINK_LIBRARIES@"
+  MODERN_RUNTIME_SOURCE_ROOT "${_IMPORT_PREFIX}/include/modern_runtime"
+)
+
+_modern_runtime_set_imported_modules(modern_runtime::modern_runtime
+  "modern.exec=${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/modern.exec.cppm"
+  "modern.exec:api=${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/api.cppm"
+  "modern.exec:detail=${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/detail.cppm"
+  "modern.task=${_IMPORT_PREFIX}/include/modern_runtime/modules/task/modern.task.cppm"
+  "modern.task.detail=${_IMPORT_PREFIX}/include/modern_runtime/modules/task/shared_state.cppm"
+  "modern.task:continuation=${_IMPORT_PREFIX}/include/modern_runtime/modules/task/continuation.cppm"
+  "modern.thread=${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/modern.thread.cppm"
+  "modern.thread:api=${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/api.cppm"
+  "modern.thread:state=${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/state.cppm"
+  "modern.timer=${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/modern.timer.cppm"
+  "modern.timer:api=${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/api.cppm"
+  "modern.timer:delayed=${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/delayed.cppm"
+  "modern.timer:periodic=${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/periodic_templates.cppm"
+  "modern.timer:state=${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/state.cppm"
+  "modern.memory=${_IMPORT_PREFIX}/include/modern_runtime/modules/memory/modern.memory.cppm"
+  "modern.platform=${_IMPORT_PREFIX}/include/modern_runtime/modules/platform/modern.platform.cppm"
+  "modern.sync=${_IMPORT_PREFIX}/include/modern_runtime/modules/sync/modern.sync.cppm"
+  "modern.runtime=${_IMPORT_PREFIX}/include/modern_runtime/modules/modern.runtime.cppm"
+  "modern.runtime:thread_adapter=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/thread_adapter.cppm"
+  "modern.runtime:timer_adapter=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/timer_adapter.cppm"
+  "modern.runtime:coroutine_task=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/coroutine_task.cppm"
+  "modern.runtime:io_bridge=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_bridge.cppm"
+  "modern.runtime:io_backend=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_backend.cppm"
+  "modern.runtime:modern_io_adapter=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/modern_io_adapter.cppm"
+  "modern.runtime:io_uring_adapter=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_uring_adapter.cppm"
+  "modern.runtime:poller_adapter=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/poller_adapter.cppm"
+  "modern.runtime:fiber_scheduler=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/fiber_scheduler.cppm"
+  "modern.runtime:sender_bridge=${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/sender_bridge.cppm"
+)
+
+target_sources(modern_runtime::modern_runtime
+  INTERFACE
+    FILE_SET "cxx_modules"
+    TYPE "CXX_MODULES"
+    BASE_DIRS "${_IMPORT_PREFIX}/include/modern_runtime"
+    FILES
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/modern.exec.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/api.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/exec/detail.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/task/modern.task.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/task/shared_state.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/task/continuation.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/modern.thread.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/api.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/thread/state.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/modern.timer.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/api.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/delayed.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/periodic_templates.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/timer/state.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/memory/modern.memory.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/platform/modern.platform.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/sync/modern.sync.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/modern.runtime.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/thread_adapter.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/timer_adapter.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/coroutine_task.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_bridge.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_backend.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/modern_io_adapter.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/io_uring_adapter.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/poller_adapter.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/fiber_scheduler.cppm"
+      "${_IMPORT_PREFIX}/include/modern_runtime/modules/runtime/sender_bridge.cppm"
+)

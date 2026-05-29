@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Threads REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/modern_runtimeTargets.cmake")
+
+if(TARGET modern_runtime::modern_runtime)
+	set_property(TARGET modern_runtime::modern_runtime PROPERTY MODERN_RUNTIME_SOURCE_ROOT "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/modern_runtime")
+elseif(TARGET modern_runtime)
+	set_property(TARGET modern_runtime PROPERTY MODERN_RUNTIME_SOURCE_ROOT "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/modern_runtime")
+endif()
+
+check_required_components(modern_runtime)

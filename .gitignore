@@ -1,0 +1,7 @@
+build/
+build_*/
+build*/
+cmake-build-*/
+compile_commands.json
+CMakeUserPresets.json
+Testing/
