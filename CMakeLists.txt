@@ -5,6 +5,8 @@ project(modern_runtime VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,12 +14,26 @@ set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 set(MODERN_RUNTIME_PACKAGE_NAME modern_runtime)
 set(MODERN_RUNTIME_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_RUNTIME_PACKAGE_NAME}")
+set(MODERN_TRACE_PROVIDER "auto" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
+set_property(CACHE MODERN_TRACE_PROVIDER PROPERTY STRINGS auto package local fetch)
+set(MODERN_TRACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../modern_trace" CACHE PATH "Path to a local modern_trace checkout")
+set(MODERN_TRACE_GIT_REPOSITORY "https://github.com/markushocke/modern_trace.git" CACHE STRING "Git repository used when MODERN_TRACE_PROVIDER=fetch")
+set(MODERN_TRACE_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_TRACE_PROVIDER=fetch")
+
+modern_runtime_resolve_trace_target(
+  MODERN_TRACE_TARGET
+  DEFAULT_PROVIDER "auto"
+  LOCAL_ROOT "${MODERN_TRACE_ROOT}"
+  FETCH_REPOSITORY "${MODERN_TRACE_GIT_REPOSITORY}"
+  FETCH_TAG "${MODERN_TRACE_GIT_TAG}"
+  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace"
+)
 
 find_package(Threads REQUIRED)
 
 add_library(modern_runtime)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
-target_link_libraries(modern_runtime PUBLIC Threads::Threads)
+target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 add_library(modern_runtime::modern_runtime ALIAS modern_runtime)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

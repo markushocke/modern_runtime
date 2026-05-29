@@ -12,6 +12,8 @@ Use modern_runtime when you want to:
 - keep execution concerns separate from domain code such as networking, file handling, or protocol layers
 - integrate external I/O backends without rebuilding a full runtime around them
 
+`modern_runtime` consumes the shared trace contract from `modern_trace`. Runtime-owned behavior is propagation and environment seeding, not trace wire-format parsing or drain infrastructure.
+
 modern_runtime is the layer below domain-specific async libraries. It owns scheduling, task orchestration, timers, coroutine task infrastructure, PMR-aware allocation points, and runtime adapters. It intentionally does not try to become a second filesystem or networking framework next to modern_io.
 
 ## What You Get
@@ -36,6 +38,10 @@ Requirements:
 Debug build:
 
 ```bash
+# Source builds resolve modern_trace automatically:
+# sibling ../modern_trace when present, otherwise GitHub fetch.
+# Override with -DMODERN_TRACE_PROVIDER=package|local|fetch
+# and -DMODERN_TRACE_ROOT=../modern_trace.
 cmake --preset debug
 cmake --build --preset debug
 ./build/debug/exec_smoke
@@ -57,7 +63,7 @@ The local validated setup is Clang 18.1.3, Ninja, CMake 3.28.3, and libstdc++ 13
 
 ## Add It To Your Project
 
-The repository builds a `modern_runtime` library target.
+The repository builds a `modern_runtime` library target and resolves `modern_trace` as a sibling or fetched dependency.
 
 ```cmake
 add_subdirectory(modern_runtime)

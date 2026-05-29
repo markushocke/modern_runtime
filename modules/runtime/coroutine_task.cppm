@@ -19,20 +19,13 @@ export module modern.runtime:coroutine_task;
 
 export import modern.exec;
 export import modern.memory;
+export import modern.trace;
 
 export namespace modern::runtime
 {
 using Scheduler = modern::scheduler;
 using StopToken = std::stop_token;
-
-struct TraceContext
-{
-  std::array<std::byte, 16> trace_id{};
-  std::array<std::byte, 8> span_id{};
-  std::uint8_t flags{};
-
-  friend bool operator==(const TraceContext&, const TraceContext&) = default;
-};
+using TraceContext = modern::trace::TraceContext;
 
 struct TaskEnvironment
 {
@@ -172,8 +165,6 @@ inline TraceContext to_trace_context(const TraceLike& trace) noexcept
 
   if constexpr (requires { trace.flags; })
     context.flags = trace.flags;
-  else if constexpr (requires { trace.trace_flags; })
-    context.flags = trace.trace_flags;
 
   return context;
 }
