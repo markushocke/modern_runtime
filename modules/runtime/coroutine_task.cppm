@@ -6,6 +6,7 @@ module;
 #include <cstdint>
 #include <exception>
 #include <expected>
+#include <functional>
 #include <latch>
 #include <memory>
 #include <memory_resource>
@@ -25,6 +26,9 @@ export namespace modern::runtime
 {
 using Scheduler = modern::scheduler;
 using StopToken = std::stop_token;
+
+template<class T>
+class Task;
 using TraceContext = modern::trace::TraceContext;
 
 struct TaskEnvironment
@@ -168,6 +172,126 @@ inline TraceContext to_trace_context(const TraceLike& trace) noexcept
 
   return context;
 }
+
+template<class T>
+struct is_task : std::false_type
+{
+};
+
+template<class T>
+struct is_task<Task<T>> : std::true_type
+{
+};
+
+template<class T>
+inline constexpr bool is_task_v = is_task<std::remove_cvref_t<T>>::value;
+
+template<class T>
+struct task_unwrap
+{
+  using type = T;
+};
+
+template<class T>
+struct task_unwrap<Task<T>>
+{
+  using type = T;
+};
+
+template<class T>
+using task_unwrap_t = typename task_unwrap<std::remove_cvref_t<T>>::type;
+
+template<class R, class T>
+struct is_task_of : std::false_type
+{
+};
+
+template<class T>
+struct is_task_of<Task<T>, T> : std::true_type
+{
+};
+
+template<class R, class T>
+inline constexpr bool is_task_of_v = is_task_of<std::remove_cvref_t<R>, T>::value;
+
+template<class T>
+struct is_expected : std::false_type
+{
+};
+
+template<class T, class E>
+struct is_expected<std::expected<T, E>> : std::true_type
+{
+};
+
+template<class T>
+inline constexpr bool is_expected_v = is_expected<std::remove_cvref_t<T>>::value;
+
+template<class T>
+struct expected_traits;
+
+template<class T>
+struct expected_traits
+{
+  using value_type = void;
+  using error_type = void;
+
+  template<class U>
+  using rebind = U;
+};
+
+template<class T, class E>
+struct expected_traits<std::expected<T, E>>
+{
+  using value_type = T;
+  using error_type = E;
+
+  template<class U>
+  using rebind = std::expected<U, E>;
+};
+
+template<class T>
+using expected_value_t = typename expected_traits<std::remove_cvref_t<T>>::value_type;
+
+template<class T>
+using expected_error_t = typename expected_traits<std::remove_cvref_t<T>>::error_type;
+
+template<class Expected, class U>
+using expected_rebind_t = typename expected_traits<std::remove_cvref_t<Expected>>::template rebind<U>;
+
+template<
+  class Expected,
+  class F,
+  bool IsExpected = is_expected_v<Expected>,
+  bool IsVoid = std::same_as<expected_value_t<Expected>, void>>
+struct expected_transform_result;
+
+template<class Expected, class F>
+struct expected_transform_result<Expected, F, false, false>
+{
+  using type = void;
+};
+
+template<class Expected, class F>
+struct expected_transform_result<Expected, F, false, true>
+{
+  using type = void;
+};
+
+template<class Expected, class F>
+struct expected_transform_result<Expected, F, true, false>
+{
+  using type = std::invoke_result_t<F&, expected_value_t<Expected>>;
+};
+
+template<class Expected, class F>
+struct expected_transform_result<Expected, F, true, true>
+{
+  using type = std::invoke_result_t<F&>;
+};
+
+template<class Expected, class F>
+using expected_transform_result_t = typename expected_transform_result<Expected, F>::type;
 } // namespace detail
 
 [[nodiscard]] inline TaskEnvironmentPolicy* task_environment_policy() noexcept
@@ -510,6 +634,135 @@ public:
     return environment().trace_context;
   }
 
+  template<class F>
+    requires (!detail::is_expected_v<T> && std::invocable<std::remove_reference_t<F>&, T>)
+  auto then(F&& continuation) &&
+    -> Task<detail::task_unwrap_t<std::invoke_result_t<std::remove_reference_t<F>&, T>>>
+  {
+    using continuation_type = std::remove_cvref_t<F>;
+    using raw_result = std::invoke_result_t<continuation_type&, T>;
+    using result_type = detail::task_unwrap_t<raw_result>;
+
+    return then_impl<continuation_type, raw_result, result_type>(
+      std::move(*this),
+      continuation_type(std::forward<F>(continuation)));
+  }
+
+  template<class F>
+    requires (!detail::is_expected_v<T> && std::invocable<std::remove_reference_t<F>&, T>)
+  auto then_on(Scheduler& scheduler, F&& continuation) &&
+    -> Task<detail::task_unwrap_t<std::invoke_result_t<std::remove_reference_t<F>&, T>>>
+  {
+    auto chained = std::move(*this).then(std::forward<F>(continuation));
+    auto environment = chained.environment();
+    environment.scheduler = &scheduler;
+    chained.set_environment(std::move(environment));
+    return chained;
+  }
+
+  template<class F>
+    requires (!detail::is_expected_v<T> && std::invocable<std::remove_reference_t<F>&, std::exception_ptr>)
+  auto catching(F&& handler) && -> Task<T>
+  {
+    using handler_type = std::remove_cvref_t<F>;
+    using handler_result = std::invoke_result_t<handler_type&, std::exception_ptr>;
+
+    static_assert(
+      std::same_as<handler_result, T> || detail::is_task_of_v<handler_result, T>,
+      "Task<T>::catching expects a handler returning T or Task<T>");
+
+    return catching_impl<handler_type, handler_result>(
+      std::move(*this),
+      handler_type(std::forward<F>(handler)));
+  }
+
+  template<class F>
+    requires (!detail::is_expected_v<T> && std::invocable<std::remove_reference_t<F>&>)
+  auto finally(F&& finalizer) && -> Task<T>
+  {
+    using finalizer_type = std::remove_cvref_t<F>;
+    using finalizer_result = std::invoke_result_t<finalizer_type&>;
+
+    static_assert(
+      std::same_as<finalizer_result, void> || detail::is_task_of_v<finalizer_result, void>,
+      "Task<T>::finally expects a finalizer returning void or Task<void>");
+
+    return finally_impl<finalizer_type, finalizer_result>(
+      std::move(*this),
+      finalizer_type(std::forward<F>(finalizer)));
+  }
+
+  template<class F>
+    requires (detail::is_expected_v<T>
+      && ((std::same_as<detail::expected_value_t<T>, void> && std::invocable<std::remove_reference_t<F>&>)
+        || (!std::same_as<detail::expected_value_t<T>, void>
+          && std::invocable<std::remove_reference_t<F>&, detail::expected_value_t<T>>)))
+  auto transform(F&& continuation) &&
+    -> Task<detail::expected_rebind_t<T, detail::expected_transform_result_t<T, std::remove_reference_t<F>>>>
+  {
+    using continuation_type = std::remove_cvref_t<F>;
+    using raw_result = detail::expected_transform_result_t<T, continuation_type>;
+
+    static_assert(
+      !detail::is_expected_v<raw_result> && !detail::is_task_v<raw_result>,
+      "ResultTask::transform expects a synchronous value-mapper returning a plain value");
+
+    return transform_impl<continuation_type, raw_result>(
+      std::move(*this),
+      continuation_type(std::forward<F>(continuation)));
+  }
+
+  template<class F>
+    requires (detail::is_expected_v<T>
+      && std::invocable<std::remove_reference_t<F>&, detail::expected_error_t<T>>)
+  auto or_else(F&& handler) && -> Task<T>
+  {
+    using handler_type = std::remove_cvref_t<F>;
+    using handler_result = std::invoke_result_t<handler_type&, detail::expected_error_t<T>>;
+
+    static_assert(
+      std::same_as<std::remove_cvref_t<handler_result>, T>,
+      "ResultTask::or_else expects a synchronous handler returning the same expected type");
+
+    return or_else_impl<handler_type>(
+      std::move(*this),
+      handler_type(std::forward<F>(handler)));
+  }
+
+  template<class F>
+    requires (detail::is_expected_v<T>
+      && ((std::same_as<detail::expected_value_t<T>, void> && std::invocable<std::remove_reference_t<F>&>)
+        || (!std::same_as<detail::expected_value_t<T>, void>
+          && std::invocable<std::remove_reference_t<F>&, detail::expected_value_t<T>>)))
+  auto then_value(F&& continuation) &&
+    -> Task<detail::expected_rebind_t<T, detail::expected_transform_result_t<T, std::remove_reference_t<F>>>>
+  {
+    return std::move(*this).transform(std::forward<F>(continuation));
+  }
+
+  template<class F>
+    requires (detail::is_expected_v<T>
+      && ((std::same_as<detail::expected_value_t<T>, void> && std::invocable<std::remove_reference_t<F>&>)
+        || (!std::same_as<detail::expected_value_t<T>, void>
+          && std::invocable<std::remove_reference_t<F>&, detail::expected_value_t<T>>)))
+  auto then_value_on(Scheduler& scheduler, F&& continuation) &&
+    -> Task<detail::expected_rebind_t<T, detail::expected_transform_result_t<T, std::remove_reference_t<F>>>>
+  {
+    auto chained = std::move(*this).then_value(std::forward<F>(continuation));
+    auto environment = chained.environment();
+    environment.scheduler = &scheduler;
+    chained.set_environment(std::move(environment));
+    return chained;
+  }
+
+  template<class F>
+    requires (detail::is_expected_v<T>
+      && std::invocable<std::remove_reference_t<F>&, detail::expected_error_t<T>>)
+  auto then_error(F&& handler) && -> Task<T>
+  {
+    return std::move(*this).or_else(std::forward<F>(handler));
+  }
+
   class promise_type
   {
   public:
@@ -633,6 +886,132 @@ public:
   };
 
 private:
+  template<class Continuation, class RawResult, class Result>
+  static Task<Result> then_impl(Task<T> task, Continuation continuation)
+  {
+    auto value = co_await task;
+
+    if constexpr (detail::is_task_v<RawResult>)
+    {
+      if constexpr (std::is_void_v<Result>)
+      {
+        co_await std::invoke(continuation, std::move(value));
+        co_return;
+      }
+      else
+      {
+        co_return co_await std::invoke(continuation, std::move(value));
+      }
+    }
+    else
+    {
+      if constexpr (std::is_void_v<RawResult>)
+      {
+        std::invoke(continuation, std::move(value));
+        co_return;
+      }
+      else
+      {
+        co_return std::invoke(continuation, std::move(value));
+      }
+    }
+  }
+
+  template<class Handler, class HandlerResult>
+  static Task<T> catching_impl(Task<T> task, Handler handler)
+  {
+    std::exception_ptr error;
+
+    try
+    {
+      co_return co_await task;
+    }
+    catch (...)
+    {
+      error = std::current_exception();
+    }
+
+    if constexpr (detail::is_task_v<HandlerResult>)
+      co_return co_await std::invoke(handler, error);
+    else
+      co_return std::invoke(handler, error);
+  }
+
+  template<class Finalizer, class FinalizerResult>
+  static Task<T> finally_impl(Task<T> task, Finalizer finalizer)
+  {
+    std::exception_ptr error;
+    std::optional<T> value;
+
+    try
+    {
+      value.emplace(co_await task);
+    }
+    catch (...)
+    {
+      error = std::current_exception();
+    }
+
+    if constexpr (detail::is_task_v<FinalizerResult>)
+      co_await std::invoke(finalizer);
+    else
+      std::invoke(finalizer);
+
+    if (error)
+      std::rethrow_exception(error);
+
+    co_return std::move(*value);
+  }
+
+  template<class Continuation, class Result>
+  static Task<detail::expected_rebind_t<T, Result>> transform_impl(Task<T> task, Continuation continuation)
+  {
+    using expected_type = T;
+    using value_type = detail::expected_value_t<expected_type>;
+    using mapped_type = detail::expected_rebind_t<expected_type, Result>;
+
+    auto expected = co_await task;
+
+    if (!expected)
+      co_return mapped_type(std::unexpected(std::move(expected.error())));
+
+    if constexpr (std::same_as<value_type, void>)
+    {
+      if constexpr (std::same_as<Result, void>)
+      {
+        std::invoke(continuation);
+        co_return mapped_type{};
+      }
+      else
+      {
+        co_return mapped_type(std::invoke(continuation));
+      }
+    }
+    else
+    {
+      if constexpr (std::same_as<Result, void>)
+      {
+        std::invoke(continuation, std::move(*expected));
+        co_return mapped_type{};
+      }
+      else
+      {
+        co_return mapped_type(std::invoke(continuation, std::move(*expected)));
+      }
+    }
+  }
+
+  template<class Handler>
+  static Task<T> or_else_impl(Task<T> task, Handler handler)
+  {
+    auto expected = co_await task;
+
+    if (expected)
+      co_return expected;
+
+    co_return std::invoke(handler, std::move(expected.error()));
+  }
+
   promise_type& state_or_throw() const
   {
     if (!handle_)
@@ -805,6 +1184,64 @@ public:
     return environment().trace_context;
   }
 
+  template<class F>
+    requires std::invocable<std::remove_reference_t<F>&>
+  auto then(F&& continuation) &&
+    -> Task<detail::task_unwrap_t<std::invoke_result_t<std::remove_reference_t<F>&>>>
+  {
+    using continuation_type = std::remove_cvref_t<F>;
+    using raw_result = std::invoke_result_t<continuation_type&>;
+    using result_type = detail::task_unwrap_t<raw_result>;
+
+    return then_impl<continuation_type, raw_result, result_type>(
+      std::move(*this),
+      continuation_type(std::forward<F>(continuation)));
+  }
+
+  template<class F>
+    requires std::invocable<std::remove_reference_t<F>&>
+  auto then_on(Scheduler& scheduler, F&& continuation) &&
+    -> Task<detail::task_unwrap_t<std::invoke_result_t<std::remove_reference_t<F>&>>>
+  {
+    auto chained = std::move(*this).then(std::forward<F>(continuation));
+    auto environment = chained.environment();
+    environment.scheduler = &scheduler;
+    chained.set_environment(std::move(environment));
+    return chained;
+  }
+
+  template<class F>
+    requires std::invocable<std::remove_reference_t<F>&, std::exception_ptr>
+  auto catching(F&& handler) && -> Task<void>
+  {
+    using handler_type = std::remove_cvref_t<F>;
+    using handler_result = std::invoke_result_t<handler_type&, std::exception_ptr>;
+
+    static_assert(
+      std::same_as<handler_result, void> || detail::is_task_of_v<handler_result, void>,
+      "Task<void>::catching expects a handler returning void or Task<void>");
+
+    return catching_impl<handler_type, handler_result>(
+      std::move(*this),
+      handler_type(std::forward<F>(handler)));
+  }
+
+  template<class F>
+    requires std::invocable<std::remove_reference_t<F>&>
+  auto finally(F&& finalizer) && -> Task<void>
+  {
+    using finalizer_type = std::remove_cvref_t<F>;
+    using finalizer_result = std::invoke_result_t<finalizer_type&>;
+
+    static_assert(
+      std::same_as<finalizer_result, void> || detail::is_task_of_v<finalizer_result, void>,
+      "Task<void>::finally expects a finalizer returning void or Task<void>");
+
+    return finally_impl<finalizer_type, finalizer_result>(
+      std::move(*this),
+      finalizer_type(std::forward<F>(finalizer)));
+  }
+
   class promise_type
   {
   public:
@@ -919,6 +1356,81 @@ public:
   };
 
 private:
+  template<class Continuation, class RawResult, class Result>
+  static Task<Result> then_impl(Task<void> task, Continuation continuation)
+  {
+    co_await task;
+
+    if constexpr (detail::is_task_v<RawResult>)
+    {
+      if constexpr (std::is_void_v<Result>)
+      {
+        co_await std::invoke(continuation);
+        co_return;
+      }
+      else
+      {
+        co_return co_await std::invoke(continuation);
+      }
+    }
+    else
+    {
+      if constexpr (std::is_void_v<RawResult>)
+      {
+        std::invoke(continuation);
+        co_return;
+      }
+      else
+      {
+        co_return std::invoke(continuation);
+      }
+    }
+  }
+
+  template<class Handler, class HandlerResult>
+  static Task<void> catching_impl(Task<void> task, Handler handler)
+  {
+    std::exception_ptr error;
+
+    try
+    {
+      co_await task;
+      co_return;
+    }
+    catch (...)
+    {
+      error = std::current_exception();
+    }
+
+    if constexpr (detail::is_task_v<HandlerResult>)
+      co_await std::invoke(handler, error);
+    else
+      std::invoke(handler, error);
+  }
+
+  template<class Finalizer, class FinalizerResult>
+  static Task<void> finally_impl(Task<void> task, Finalizer finalizer)
+  {
+    std::exception_ptr error;
+
+    try
+    {
+      co_await task;
+    }
+    catch (...)
+    {
+      error = std::current_exception();
+    }
+
+    if constexpr (detail::is_task_v<FinalizerResult>)
+      co_await std::invoke(finalizer);
+    else
+      std::invoke(finalizer);
+
+    if (error)
+      std::rethrow_exception(error);
+  }
+
   promise_type& state_or_throw() const
   {
     if (!handle_)
