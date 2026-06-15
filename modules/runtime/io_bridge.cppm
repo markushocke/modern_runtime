@@ -306,7 +306,7 @@ auto bind_io(scheduler completion_scheduler, memory::memory_resource* resource, 
   }
   catch (...)
   {
-    completion.set_exception(std::current_exception());
+    completion_state->set_exception(std::current_exception());
   }
 
   return result;
@@ -358,7 +358,7 @@ auto bind_io(
   }
   catch (...)
   {
-    completion.set_exception(std::current_exception());
+    completion_state->set_exception(std::current_exception());
   }
 
   return result;
