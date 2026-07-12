@@ -34,6 +34,17 @@ find_package(Threads REQUIRED)
 add_library(modern_runtime)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
 target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
+target_include_directories(modern_runtime PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/detail
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/exec
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/thread
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/timer
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/memory
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/platform
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/sync
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/runtime
+)
 add_library(modern_runtime::modern_runtime ALIAS modern_runtime)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -47,9 +58,11 @@ target_sources(modern_runtime
       modules/exec/modern.exec.cppm
       modules/exec/api.cppm
       modules/exec/detail.cppm
+      modules/exec/scheduler.cppm
       modules/task/modern.task.cppm
       modules/task/shared_state.cppm
-      modules/task/continuation.cppm
+      modules/task/task_continuation.cppm
+      modules/task/environment.cppm
       modules/thread/modern.thread.cppm
       modules/thread/api.cppm
       modules/thread/state.cppm
@@ -64,25 +77,22 @@ target_sources(modern_runtime
       modules/modern.runtime.cppm
       modules/runtime/thread_adapter.cppm
       modules/runtime/timer_adapter.cppm
-      modules/runtime/coroutine_task.cppm
-        modules/runtime/io_bridge.cppm
-          modules/runtime/io_backend.cppm
-        modules/runtime/modern_io_adapter.cppm
-          modules/runtime/io_uring_adapter.cppm
-          modules/runtime/poller_adapter.cppm
-            modules/runtime/fiber_scheduler.cppm
-        modules/runtime/sender_bridge.cppm
+      modules/runtime/io_bridge.cppm
+      modules/runtime/io_backend.cppm
+      modules/runtime/modern_io_adapter.cppm
+      modules/runtime/io_uring_adapter.cppm
+      modules/runtime/poller_adapter.cppm
+      modules/runtime/fiber_scheduler.cppm
+      modules/runtime/sender_bridge.cppm
   PRIVATE
-      modules/exec/scheduler.cpp
-      modules/exec/inline_executor.cpp
-      modules/thread/thread_pool.cpp
-      modules/thread/worker.cpp
-      modules/timer/scheduled_executor.cpp
-      modules/timer/periodic.cpp
-      modules/memory/arena.cpp
-      modules/memory/pool.cpp
-      modules/platform/clocks.cpp
-      modules/sync/event.cpp
+    modules/thread/thread_pool.cpp
+    modules/thread/worker.cpp
+    modules/timer/scheduled_executor.cpp
+    modules/timer/periodic.cpp
+    modules/memory/arena.cpp
+    modules/memory/pool.cpp
+    modules/platform/clocks.cpp
+    modules/sync/event.cpp
 )
 
 add_executable(exec_smoke tests/exec_smoke.cpp)
@@ -93,6 +103,16 @@ target_link_libraries(async_demo PRIVATE modern_runtime)
 
 add_executable(smoke_test tests/smoke_test.cpp)
 target_link_libraries(smoke_test PRIVATE modern_runtime)
+
+add_executable(task_characterization tests/task_characterization.cpp)
+target_link_libraries(task_characterization PRIVATE modern_runtime)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_test(NAME exec_smoke COMMAND exec_smoke)
+  add_test(NAME smoke_test COMMAND smoke_test)
+  add_test(NAME task_characterization COMMAND task_characterization)
+endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
 if(_modern_runtime_compile_options STREQUAL "_modern_runtime_compile_options-NOTFOUND")

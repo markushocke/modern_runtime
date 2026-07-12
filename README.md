@@ -7,7 +7,7 @@ modern-runtime is a modular C++23 runtime for applications and libraries that ne
 Use modern_runtime when you want to:
 
 - run CPU work, timer work, and completion-based async work through one runtime surface
-- compose pipelines with `modern::task<T>` continuations or coroutine-native `modern::runtime::Task<T>`
+- compose pipelines with `modern::task<T>` using continuations (`then`, `catching`, `finally`) or coroutines (`co_await`, `co_return`)
 - propagate scheduler, allocator, stop, and trace context across async boundaries
 - keep execution concerns separate from domain code such as networking, file handling, or protocol layers
 - integrate external I/O backends without rebuilding a full runtime around them
@@ -148,11 +148,51 @@ import modern.memory;
 import modern.platform;
 ```
 
-### Choose The Task Model
+### The Task Model
 
-- Use `modern::task<T>` when you want continuation-oriented pipelines with `then`, `catching`, and `finally`.
-- Use `modern::runtime::Task<T>` when you want a coroutine-native task type and runtime environment propagation.
-- Use `modern::runtime::ResultTask<T, E>` or `StatusTask<E>` when your coroutine surface should model `std::expected` results directly.
+`modern::task<T>` is the single unified task type. It supports both composition styles:
+
+**Continuation style:**
+```cpp
+auto result = modern::submit(pool, work)
+    .then(transform)
+    .catching(handle_error)
+    .finally(cleanup);
+```
+
+**Coroutine style:**
+```cpp
+modern::task<int> operation()
+{
+    auto value = co_await modern::submit(pool, work);
+    co_return value * 2;
+}
+```
+
+**Mixed style:**
+```cpp
+modern::task<int> operation()
+{
+    auto value = co_await modern::submit(pool, work)
+        .then([](int x) { return x * 2; });
+    co_return value;
+}
+```
+
+All async producers (`submit`, `schedule_after`, `schedule_at`, `bind_io`, `as_task`, I/O adapters) return `modern::task<T>`.
+
+**Start semantics:**
+- Coroutine functions returning `task<T>` start **eagerly** (run immediately on creation)
+- `submit`, `schedule_after`, `schedule_at`, I/O operations start **eagerly** (work submitted/armed immediately)
+
+**Consumption:**
+- `task<T>` is move-only and **single-consumer**
+- Consume via `get()`, `co_await`, or `then()`/`catching()`/`finally()`
+- Second consumption throws `std::logic_error`
+
+**Cancellation:**
+- `std::stop_token` propagates through `task_environment`
+- `co_await` and `get()` throw `operation_cancelled` on stopped state
 
 ### Schedule Work
 
@@ -180,15 +220,14 @@ This keeps the ownership line clear: modern_runtime provides the runtime substra
 
 - `modern::as_task<R>(sender, scheduler, resource)` adapts senders into `task<R>`.
 - `modern::fiber_scheduler` provides cooperative scheduler-based fiber requeueing and grouped stop/join behavior.
-- `modern::runtime::TaskEnvironment` carries scheduler, frame allocator, trace context, and stop state through coroutine execution.
+- `modern::task_environment` carries scheduler, frame allocator, trace context, and stop state through coroutine and continuation execution.
 
 ## Repository Guide
 
 - [modules/exec/modern.exec.cppm](modules/exec/modern.exec.cppm): scheduler, priorities, and inline executor
-- [modules/task/modern.task.cppm](modules/task/modern.task.cppm): `task<T>`, `task_scope`, continuations, and coroutine bridge
+- [modules/task/modern.task.cppm](modules/task/modern.task.cppm): `task<T>`, `task_scope`, continuations, coroutine support, and environment
 - [modules/thread/modern.thread.cppm](modules/thread/modern.thread.cppm): thread pool with work stealing, affinity, and prioritized scheduling
 - [modules/timer/modern.timer.cppm](modules/timer/modern.timer.cppm): delayed and periodic scheduling
-- [modules/runtime/coroutine_task.cppm](modules/runtime/coroutine_task.cppm): generic runtime coroutine task, result-task aliases, and `TaskEnvironment`
 - [modules/runtime/fiber_scheduler.cppm](modules/runtime/fiber_scheduler.cppm): cooperative fiber scheduler over the scheduler surface
 - [modules/runtime/io_bridge.cppm](modules/runtime/io_bridge.cppm): bridge from external completion sources to `task<T>`
 - [modules/runtime/io_backend.cppm](modules/runtime/io_backend.cppm): backend metadata and abstraction for `io_uring`, `epoll`, and `kqueue`
@@ -199,4 +238,3 @@ This keeps the ownership line clear: modern_runtime provides the runtime substra
 - [modules/memory/modern.memory.cppm](modules/memory/modern.memory.cppm): small `std::pmr` surface
 - [modules/modern.runtime.cppm](modules/modern.runtime.cppm): umbrella module and integration functions
 - [examples/async_demo.cpp](examples/async_demo.cpp): runnable reference demo
-- [tests/smoke_test.cpp](tests/smoke_test.cpp): focused runtime regression coverage

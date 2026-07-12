@@ -18,7 +18,7 @@ export import modern.memory;
 export import modern.task;
 export import modern.timer;
 
-import modern.task.detail;
+import modern.task_detail;
 
 namespace modern::detail
 {

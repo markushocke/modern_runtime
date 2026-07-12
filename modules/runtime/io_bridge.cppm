@@ -19,7 +19,7 @@ export import modern.exec;
 export import modern.memory;
 export import modern.task;
 
-import modern.task.detail;
+import modern.task_detail;
 
 namespace modern::detail
 {

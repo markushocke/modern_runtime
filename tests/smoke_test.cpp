@@ -360,9 +360,9 @@ int main()
     {
       (void)cancelled_io.get();
     }
-    catch (const std::runtime_error& e)
+    catch (const modern::operation_cancelled&)
     {
-      io_cancelled = std::string{e.what()} == "task cancelled";
+      io_cancelled = true;
     }
 
     if (!io_cancelled || io.start_calls() != io_cancel_starts_before)
@@ -480,9 +480,9 @@ int main()
     {
       (void)modern::as_task<int>(mock_stopped_sender{}, cpu.get_scheduler(), &task_resource).get();
     }
-    catch (const std::runtime_error& e)
+    catch (const modern::operation_cancelled&)
     {
-      sender_stopped = std::string{e.what()} == "task cancelled";
+      sender_stopped = true;
     }
 
     if (!sender_stopped)
@@ -612,37 +612,36 @@ int main()
     auto runtime_task_allocations_before = task_resource.allocations();
 
     {
-      modern::runtime::FrameMemoryResourceScope frame_scope{&task_resource};
-      auto runtime_task = []() -> modern::runtime::Task<int>
+      modern::frame_resource_scope frame_scope{&task_resource};
+      auto runtime_task = []() -> modern::task<int>
       {
         co_return 7;
       }();
 
-      if (runtime_task.sync_wait() != 7 || task_resource.allocations() <= runtime_task_allocations_before)
+      if (runtime_task.get() != 7 || task_resource.allocations() <= runtime_task_allocations_before)
       {
         std::cerr << "runtime task frame resource check failed\n";
         return 1;
       }
     }
 
-    modern::runtime::TraceContext runtime_trace;
+    modern::trace::TraceContext runtime_trace;
     runtime_trace.trace_id[0] = std::byte{0x4b};
     runtime_trace.span_id[0] = std::byte{0x2a};
     runtime_trace.flags = 1;
 
-    auto read_runtime_trace = []() -> modern::runtime::Task<std::optional<modern::runtime::TraceContext>>
+    auto read_runtime_trace = []() -> modern::task<std::optional<modern::trace::TraceContext>>
     {
-      co_return co_await modern::runtime::current_trace_context();
+      co_return co_await modern::this_task::trace_context();
     };
 
-    auto read_child_runtime_trace = [&]() -> modern::runtime::Task<std::optional<modern::runtime::TraceContext>>
+    auto read_child_runtime_trace = [&]() -> modern::task<std::optional<modern::trace::TraceContext>>
     {
       co_return co_await read_runtime_trace();
     };
 
-    auto runtime_trace_task = read_child_runtime_trace();
-    runtime_trace_task.set_trace_context(runtime_trace);
-    auto inherited_runtime_trace = runtime_trace_task.sync_wait();
+    modern::trace_context_scope runtime_trace_scope{runtime_trace};
+    auto inherited_runtime_trace = read_child_runtime_trace().get();
 
     if (!inherited_runtime_trace || inherited_runtime_trace != runtime_trace)
     {
@@ -650,10 +649,10 @@ int main()
       return 1;
     }
 
-    auto runtime_result = []() -> modern::runtime::ResultTask<int, std::error_code>
+    auto runtime_result = []() -> modern::result_task<int, std::error_code>
     {
       co_return std::expected<int, std::error_code>{42};
-    }().sync_wait();
+    }().get();
 
     if (!runtime_result || *runtime_result != 42)
     {
@@ -896,9 +895,9 @@ int main()
     {
       (void)cancelled_task.get();
     }
-    catch (const std::runtime_error& e)
+    catch (const modern::operation_cancelled&)
     {
-      submit_cancelled = std::string{e.what()} == "task cancelled";
+      submit_cancelled = true;
     }
 
     if (!submit_cancelled || cancelled_task_ran)
@@ -926,9 +925,9 @@ int main()
     {
       (void)cancelled_timer.get();
     }
-    catch (const std::runtime_error& e)
+    catch (const modern::operation_cancelled&)
     {
-      timer_cancelled = std::string{e.what()} == "task cancelled";
+      timer_cancelled = true;
     }
 
     if (!timer_cancelled || cancelled_timer_ran)

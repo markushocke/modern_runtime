@@ -1,3 +1,5 @@
+module;
+
 export module modern.runtime;
 
 export import modern.exec;
@@ -9,7 +11,6 @@ export import modern.platform;
 export import modern.sync;
 export import :thread_adapter;
 export import :timer_adapter;
-export import :coroutine_task;
 export import :io_bridge;
 export import :io_backend;
 export import :modern_io_adapter;

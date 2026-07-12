@@ -10,6 +10,7 @@ export module modern.runtime:thread_adapter;
 export import modern.memory;
 export import modern.task;
 export import modern.thread;
+export import modern.exec;
 
 export namespace modern
 {
