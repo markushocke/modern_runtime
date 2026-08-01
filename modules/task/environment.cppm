@@ -1,6 +1,7 @@
 module;
 
 #include <coroutine>
+#include <chrono>
 #include <memory_resource>
 #include <optional>
 #include <stop_token>
@@ -14,12 +15,53 @@ export import modern.trace;
 
 export namespace modern
 {
+class deadline
+{
+public:
+  using clock = std::chrono::steady_clock;
+  using time_point = clock::time_point;
+
+  constexpr deadline() noexcept = default;
+  explicit constexpr deadline(time_point value) noexcept : value_(value) {}
+
+  [[nodiscard]] static constexpr deadline unbounded() noexcept { return {}; }
+  [[nodiscard]] static constexpr deadline at(time_point value) noexcept { return deadline{value}; }
+
+  template<class Rep, class Period>
+  [[nodiscard]] static deadline after(std::chrono::duration<Rep, Period> value) noexcept
+  {
+    return at(clock::now() + std::chrono::duration_cast<clock::duration>(value));
+  }
+
+  [[nodiscard]] constexpr bool bounded() const noexcept { return value_.has_value(); }
+  [[nodiscard]] constexpr const std::optional<time_point>& value() const noexcept { return value_; }
+  [[nodiscard]] bool expired(time_point now = clock::now()) const noexcept
+  {
+    return value_ && now >= *value_;
+  }
+
+  friend constexpr bool operator==(const deadline&, const deadline&) noexcept = default;
+
+private:
+  std::optional<time_point> value_{};
+};
+
+[[nodiscard]] inline constexpr deadline earlier(deadline left, deadline right) noexcept
+{
+  if (!left.bounded())
+    return right;
+  if (!right.bounded())
+    return left;
+  return *left.value() <= *right.value() ? left : right;
+}
+
 struct task_environment
 {
   scheduler scheduler{};
   std::pmr::memory_resource* frame_resource{};
   std::optional<trace::TraceContext> trace_context{};
   std::stop_token stop_token{};
+  deadline execution_deadline{};
 };
 
 inline void merge_environment(task_environment& target, const task_environment& source) noexcept
@@ -32,6 +74,7 @@ inline void merge_environment(task_environment& target, const task_environment& 
     target.trace_context = source.trace_context;
   if (!target.stop_token.stop_possible() && source.stop_token.stop_possible())
     target.stop_token = source.stop_token;
+  target.execution_deadline = earlier(target.execution_deadline, source.execution_deadline);
 }
 
 namespace detail
@@ -128,12 +171,14 @@ struct scheduler_query {};
 struct memory_resource_query {};
 struct trace_context_query {};
 struct stop_token_query {};
+struct deadline_query {};
 
 inline environment_query environment() noexcept { return {}; }
 inline scheduler_query scheduler() noexcept { return {}; }
 inline memory_resource_query memory_resource() noexcept { return {}; }
 inline trace_context_query trace_context() noexcept { return {}; }
 inline stop_token_query stop_token() noexcept { return {}; }
+inline deadline_query deadline() noexcept { return {}; }
 } // namespace this_task
 
 namespace detail

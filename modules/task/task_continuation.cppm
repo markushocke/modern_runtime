@@ -19,6 +19,7 @@ module;
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 export module modern.task_continuation;
 
@@ -27,15 +28,50 @@ export import modern.memory;
 export import modern.task_environment;
 export import modern.task_detail;
 
+export namespace modern
+{
+class task_scope_error final : public std::runtime_error
+{
+public:
+  explicit task_scope_error(std::vector<std::exception_ptr> exceptions)
+    : std::runtime_error("one or more task_scope children failed"),
+      exceptions_(std::move(exceptions)) {}
+
+  [[nodiscard]] const std::vector<std::exception_ptr>& exceptions() const noexcept
+  {
+    return exceptions_;
+  }
+
+private:
+  std::vector<std::exception_ptr> exceptions_;
+};
+}
+
 namespace modern::detail
 {
 class task_scope_state
 {
 public:
-  explicit task_scope_state(scheduler executor, memory::memory_resource* resource) noexcept
+  using parent_stop_callback = std::stop_callback<std::function<void()>>;
+
+  explicit task_scope_state(
+    scheduler executor,
+    memory::memory_resource* resource,
+    task_environment environment)
     : executor_(std::move(executor)),
-      resource_(resource ? resource : memory::get_default_resource())
+      resource_(resource ? resource : memory::get_default_resource()),
+      environment_(std::move(environment))
   {
+    environment_.scheduler = executor_;
+    environment_.frame_resource = resource_;
+    const auto parent_token = environment_.stop_token;
+    environment_.stop_token = stop_source_.get_token();
+    if (parent_token.stop_possible())
+    {
+      parent_stop_ = std::make_unique<parent_stop_callback>(
+        parent_token,
+        std::function<void()>{[this] { request_stop(); }});
+    }
   }
 
   [[nodiscard]] scheduler executor() const
@@ -51,6 +87,11 @@ public:
   [[nodiscard]] std::stop_token token() const noexcept
   {
     return stop_source_.get_token();
+  }
+
+  [[nodiscard]] task_environment environment() const
+  {
+    return environment_;
   }
 
   void add_child()
@@ -77,11 +118,8 @@ public:
     {
       std::lock_guard lock(mutex_);
 
-      if (!exception_)
-      {
-        exception_ = exception;
-        should_cancel = true;
-      }
+      should_cancel = exceptions_.empty();
+      exceptions_.push_back(std::move(exception));
     }
 
     if (should_cancel)
@@ -100,7 +138,7 @@ public:
 
   void join()
   {
-    std::exception_ptr exception;
+    std::vector<std::exception_ptr> exceptions;
 
     {
       std::unique_lock lock(mutex_);
@@ -109,11 +147,11 @@ public:
         return active_children_ == 0;
       });
 
-      exception = exception_;
+      exceptions = exceptions_;
     }
 
-    if (exception)
-      std::rethrow_exception(exception);
+    if (!exceptions.empty())
+      throw task_scope_error(std::move(exceptions));
   }
 
   void join_noexcept() noexcept
@@ -131,10 +169,12 @@ private:
   scheduler executor_;
   memory::memory_resource* resource_;
   std::stop_source stop_source_;
+  task_environment environment_;
+  std::unique_ptr<parent_stop_callback> parent_stop_;
   mutable std::mutex mutex_;
   std::condition_variable cv_;
   std::size_t active_children_ = 0;
-  std::exception_ptr exception_;
+  std::vector<std::exception_ptr> exceptions_;
 };
 
 template<class F, class... Args>
@@ -159,6 +199,8 @@ struct stoppable_submit_result<F, Args...>
 
 export namespace modern
 {
+template<class T>
+class task;
 
 class task_scope
 {
@@ -167,7 +209,8 @@ public:
     : state_(detail::allocate_shared_object<detail::task_scope_state>(
         resource ? resource : memory::get_default_resource(),
         std::move(executor),
-        resource ? resource : memory::get_default_resource()))
+        resource ? resource : memory::get_default_resource(),
+        current_task_environment_value()))
 {
   }
 
@@ -193,6 +236,7 @@ public:
     auto state = state_or_throw();
     auto token = state->token();
     auto executor = state->executor();
+    auto environment = state->environment();
 
     state->add_child();
 
@@ -203,9 +247,11 @@ public:
 
       executor.execute([state,
                         token,
+                        environment = std::move(environment),
                         callable = std::move(callable),
                         arguments = std::move(arguments)]() mutable
       {
+        task_environment_scope environment_scope{std::move(environment)};
         struct child_guard final
         {
           std::shared_ptr<detail::task_scope_state> state;
@@ -248,6 +294,15 @@ public:
     }
   }
 
+
+  void spawn_async(task<void> child);
+
+  template<class F, class... Args>
+    requires std::same_as<
+      std::remove_cvref_t<std::invoke_result_t<F&, Args...>>,
+      task<void>>
+  void spawn_async(F&& f, Args&&... args);
+
   void request_stop() noexcept
   {
     if (state_)
@@ -275,9 +330,6 @@ private:
 
   std::shared_ptr<detail::task_scope_state> state_;
 };
-
-template<class T>
-class task;
 
 class task_scope;
 
@@ -456,6 +508,11 @@ public:
     detail::ready_awaiter<std::stop_token> await_transform(this_task::stop_token_query) noexcept
     {
       return {environment_.stop_token};
+    }
+
+    detail::ready_awaiter<deadline> await_transform(this_task::deadline_query) noexcept
+    {
+      return {environment_.execution_deadline};
     }
 
     template<class Awaitable>
@@ -717,6 +774,7 @@ public:
     detail::ready_awaiter<std::pmr::memory_resource*> await_transform(this_task::memory_resource_query) noexcept { return {environment_.frame_resource}; }
     detail::ready_awaiter<std::optional<trace::TraceContext>> await_transform(this_task::trace_context_query) noexcept { return {environment_.trace_context}; }
     detail::ready_awaiter<std::stop_token> await_transform(this_task::stop_token_query) noexcept { return {environment_.stop_token}; }
+    detail::ready_awaiter<deadline> await_transform(this_task::deadline_query) noexcept { return {environment_.execution_deadline}; }
 
     template<class Awaitable>
     Awaitable&& await_transform(Awaitable&& awaitable) noexcept
@@ -912,6 +970,55 @@ using result_task = task<std::expected<T, E>>;
 
 template<class E>
 using status_task = task<std::expected<void, E>>;
+
+namespace detail
+{
+inline task<void> observe_scope_child(
+  task<void> child,
+  std::shared_ptr<task_scope_state> state)
+{
+  try
+  {
+    co_await std::move(child);
+  }
+  catch (...)
+  {
+    state->record_exception(std::current_exception());
+  }
+  state->child_completed();
+}
+} // namespace detail
+
+inline void task_scope::spawn_async(task<void> child)
+{
+  auto state = state_or_throw();
+  if (!child.valid())
+    throw std::invalid_argument("task_scope cannot spawn an invalid task");
+
+  state->add_child();
+  try
+  {
+    task_environment_scope environment_scope{state->environment()};
+    auto observer = detail::observe_scope_child(std::move(child), state);
+    observer.detach();
+  }
+  catch (...)
+  {
+    state->child_completed();
+    throw;
+  }
+}
+
+template<class F, class... Args>
+  requires std::same_as<
+    std::remove_cvref_t<std::invoke_result_t<F&, Args...>>,
+    task<void>>
+void task_scope::spawn_async(F&& f, Args&&... args)
+{
+  auto state = state_or_throw();
+  task_environment_scope environment_scope{state->environment()};
+  spawn_async(std::invoke(std::forward<F>(f), std::forward<Args>(args)...));
+}
 } // namespace modern
 
 export namespace modern::detail

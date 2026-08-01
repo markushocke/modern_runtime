@@ -7,6 +7,7 @@ module;
 #include <exception>
 #include <functional>
 #include <memory>
+#include <memory_resource>
 #include <stop_token>
 #include <stdexcept>
 #include <type_traits>
@@ -44,6 +45,110 @@ struct stoppable_timer_result<F>
 
 export namespace modern
 {
+enum class cancellation_outcome
+{
+  pending,
+  completed,
+  parent_cancelled,
+  deadline_expired,
+  runtime_shutdown
+};
+
+namespace detail
+{
+class deadline_cancellation_state
+{
+public:
+  bool finish(cancellation_outcome desired, bool request_stop) noexcept
+  {
+    auto expected = cancellation_outcome::pending;
+    if (!outcome_.compare_exchange_strong(
+          expected, desired, std::memory_order_acq_rel, std::memory_order_acquire))
+      return false;
+    if (request_stop)
+      stop_source_.request_stop();
+    return true;
+  }
+
+  [[nodiscard]] std::stop_token token() const noexcept { return stop_source_.get_token(); }
+  [[nodiscard]] cancellation_outcome outcome() const noexcept
+  {
+    return outcome_.load(std::memory_order_acquire);
+  }
+
+private:
+  std::stop_source stop_source_;
+  std::atomic<cancellation_outcome> outcome_{cancellation_outcome::pending};
+};
+} // namespace detail
+
+class deadline_cancellation_controller
+{
+public:
+  using parent_callback = std::stop_callback<std::function<void()>>;
+
+  deadline_cancellation_controller(
+    scheduled_executor& timers,
+    std::stop_token parent,
+    deadline due = deadline::unbounded(),
+    memory::memory_resource* resource = memory::get_default_resource())
+    : state_(detail::allocate_shared_object<detail::deadline_cancellation_state>(
+        resource ? resource : memory::get_default_resource()))
+  {
+    if (parent.stop_possible())
+    {
+      parent_callback_ = std::make_unique<parent_callback>(
+        parent,
+        std::function<void()>{[state = state_]
+        {
+          state->finish(cancellation_outcome::parent_cancelled, true);
+        }});
+    }
+
+    if (!due.bounded())
+      return;
+
+    if (due.expired())
+    {
+      state_->finish(cancellation_outcome::deadline_expired, true);
+      return;
+    }
+
+    timers.schedule_at(
+      *due.value(),
+      [state = state_]
+      {
+        state->finish(cancellation_outcome::deadline_expired, true);
+      },
+      [state = state_]
+      {
+        state->finish(cancellation_outcome::runtime_shutdown, true);
+      });
+  }
+
+  deadline_cancellation_controller(deadline_cancellation_controller&&) noexcept = default;
+  deadline_cancellation_controller& operator=(deadline_cancellation_controller&&) noexcept = default;
+  deadline_cancellation_controller(const deadline_cancellation_controller&) = delete;
+  deadline_cancellation_controller& operator=(const deadline_cancellation_controller&) = delete;
+
+  ~deadline_cancellation_controller()
+  {
+    complete();
+  }
+
+  [[nodiscard]] std::stop_token token() const noexcept { return state_->token(); }
+  [[nodiscard]] cancellation_outcome outcome() const noexcept { return state_->outcome(); }
+
+  bool complete() noexcept
+  {
+    return state_ && state_->finish(cancellation_outcome::completed, false);
+  }
+
+private:
+  std::shared_ptr<detail::deadline_cancellation_state> state_;
+  std::unique_ptr<parent_callback> parent_callback_;
+};
+
 template<class Clock, class Duration, class F>
 auto schedule_at(
   scheduled_executor& executor,

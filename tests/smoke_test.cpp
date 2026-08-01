@@ -967,9 +967,19 @@ int main()
     {
       scope.join();
     }
-    catch (const std::runtime_error& e)
+    catch (const modern::task_scope_error& e)
     {
-      scope_failed = std::string{e.what()} == "scope boom";
+      if (e.exceptions().size() == 1)
+      {
+        try
+        {
+          std::rethrow_exception(e.exceptions().front());
+        }
+        catch (const std::runtime_error& child)
+        {
+          scope_failed = std::string{child.what()} == "scope boom";
+        }
+      }
     }
 
     if (!scope_failed || !scope_cancelled.load(std::memory_order_relaxed))
