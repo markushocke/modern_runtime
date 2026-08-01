@@ -4,6 +4,7 @@ export module modern.runtime;
 
 export import modern.exec;
 export import modern.task;
+export import modern.stream;
 export import modern.thread;
 export import modern.timer;
 export import modern.memory;

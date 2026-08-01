@@ -48,3 +48,10 @@ The `modern.runtime` umbrella exports thread and timer adapters, completion
 I/O bridges, modern_io, io_uring and poller adapters, sender bridging, and the
 fiber scheduler. Their asynchronous task-producing operations return
 `modern::task<T>`.
+
+## Streams
+
+`modern::stream<T>` is the bounded, move-only SPSC stream contract. Producers
+are created with `modern::make_stream()` and receive a move-only
+`modern::stream_source<T>`. See [stream_contract.md](stream_contract.md) for the
+backpressure, terminal-state, cancellation, and completion-observer rules.

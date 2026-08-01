@@ -22,6 +22,7 @@ modern_runtime is the layer below domain-specific async libraries. It owns sched
 - `modern.thread`: thread pools, work stealing, bounded queues, and affinity-aware workers
 - `modern.timer`: delayed and periodic scheduling
 - `modern.task`: `task<T>` continuations with `then`, `catching`, and `finally`
+- `modern.stream`: bounded, backpressured, single-producer/single-consumer streams
 - `modern.runtime`: umbrella module for adapters, fibers, senders, and coroutine-native runtime tasks
 - `modern.memory`: a small `std::pmr`-oriented allocation surface
 - `modern.sync` and `modern.platform`: synchronization and platform helpers used by the runtime surface
@@ -141,6 +142,7 @@ Use narrow imports when you want explicit boundaries:
 ```cpp
 import modern.exec;
 import modern.task;
+import modern.stream;
 import modern.timer;
 import modern.thread;
 import modern.sync;
@@ -179,7 +181,7 @@ modern::task<int> operation()
 }
 ```
 
-All async producers (`submit`, `schedule_after`, `schedule_at`, `bind_io`, `as_task`, I/O adapters) return `modern::task<T>`.
+All one-shot async producers (`submit`, `schedule_after`, `schedule_at`, `bind_io`, `as_task`, I/O adapters) return `modern::task<T>`.
 
 **Start semantics:**
 - Coroutine functions returning `task<T>` start **eagerly** (run immediately on creation)
@@ -222,10 +224,40 @@ This keeps the ownership line clear: modern_runtime provides the runtime substra
 - `modern::fiber_scheduler` provides cooperative scheduler-based fiber requeueing and grouped stop/join behavior.
 - `modern::task_environment` carries scheduler, frame allocator, trace context, and stop state through coroutine and continuation execution.
 
+### Produce And Consume Streams
+
+`modern::stream<T>` is a move-only, bounded SPSC stream. `next()` returns a
+task containing either a value, clean EOF, or a typed `stream_error`. Producers
+created through `make_stream()` receive a move-only `stream_source<T>`; its
+`send()` operation applies backpressure while the configured buffer is full.
+
+```cpp
+auto values = modern::make_stream<int>(1,
+  [](modern::stream_source<int> source) -> modern::task<void>
+  {
+    if (auto sent = co_await source.send(1); !sent)
+      co_return;
+    if (auto sent = co_await source.send(2); !sent)
+      co_return;
+  });
+
+while (auto item = values.next().get())
+{
+  if (!*item)
+    break;
+  std::cout << **item << "\n";
+}
+```
+
+Normal producer completion closes and drains accepted values. Failure and
+cancellation discard buffered values immediately. The complete contract is in
+[docs/stream_contract.md](docs/stream_contract.md).
+
 ## Repository Guide
 
 - [modules/exec/modern.exec.cppm](modules/exec/modern.exec.cppm): scheduler, priorities, and inline executor
 - [modules/task/modern.task.cppm](modules/task/modern.task.cppm): `task<T>`, `task_scope`, continuations, coroutine support, and environment
+- [modules/stream/modern.stream.cppm](modules/stream/modern.stream.cppm): bounded SPSC stream core, producer source, and completion observation
 - [modules/thread/modern.thread.cppm](modules/thread/modern.thread.cppm): thread pool with work stealing, affinity, and prioritized scheduling
 - [modules/timer/modern.timer.cppm](modules/timer/modern.timer.cppm): delayed and periodic scheduling
 - [modules/runtime/fiber_scheduler.cppm](modules/runtime/fiber_scheduler.cppm): cooperative fiber scheduler over the scheduler surface

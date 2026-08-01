@@ -43,6 +43,7 @@ target_include_directories(modern_runtime PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/memory
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/platform
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/sync
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/stream
   ${CMAKE_CURRENT_SOURCE_DIR}/modules/runtime
 )
 add_library(modern_runtime::modern_runtime ALIAS modern_runtime)
@@ -63,6 +64,7 @@ target_sources(modern_runtime
       modules/task/shared_state.cppm
       modules/task/task_continuation.cppm
       modules/task/environment.cppm
+      modules/stream/modern.stream.cppm
       modules/thread/modern.thread.cppm
       modules/thread/api.cppm
       modules/thread/state.cppm
@@ -107,11 +109,15 @@ target_link_libraries(smoke_test PRIVATE modern_runtime)
 add_executable(task_characterization tests/task_characterization.cpp)
 target_link_libraries(task_characterization PRIVATE modern_runtime)
 
+add_executable(stream_characterization tests/stream_characterization.cpp)
+target_link_libraries(stream_characterization PRIVATE modern_runtime)
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME exec_smoke COMMAND exec_smoke)
   add_test(NAME smoke_test COMMAND smoke_test)
   add_test(NAME task_characterization COMMAND task_characterization)
+  add_test(NAME stream_characterization COMMAND stream_characterization)
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
