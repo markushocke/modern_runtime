@@ -118,6 +118,21 @@ void test_request_stop_is_shared()
     "request_stop did not cancel the producer");
 }
 
+void test_cancel_with_pointer_convertible_value()
+{
+  auto values = modern::make_stream<void*>(1,
+    [](modern::stream_source<void*> source) -> modern::task<void>
+    {
+      (void)co_await source.send(nullptr);
+      (void)co_await source.send(nullptr);
+    });
+
+  values.request_stop();
+  auto stopped = values.next().get();
+  require(!stopped && stopped.error().code == modern::stream_error_code::cancelled,
+    "cancellation injected an allocator pointer as a stream value");
+}
+
 void test_consumer_destruction_cancels_writer()
 {
   std::atomic<bool> consumer_gone = false;
@@ -277,6 +292,7 @@ int main()
   test_close_drains_and_backpressures();
   test_fail_is_immediate();
   test_request_stop_is_shared();
+  test_cancel_with_pointer_convertible_value();
   test_consumer_destruction_cancels_writer();
   test_completion_observer();
   test_producer_exception_is_typed();

@@ -480,7 +480,10 @@ private:
   {
     std::shared_ptr<shared_state<next_result>> reader_to_complete;
     std::shared_ptr<shared_state<send_result>> writer_to_complete;
-    std::pmr::deque<T> discarded{resource_};
+    // Parentheses are intentional: braces can select deque's initializer-list
+    // constructor when T is constructible from memory_resource*, injecting a
+    // phantom item and making the allocator swap undefined.
+    std::pmr::deque<T> discarded(resource_);
     std::vector<std::pair<stream_observer, stream_completion>> observers;
 
     {
