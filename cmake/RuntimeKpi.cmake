@@ -1,0 +1,12 @@
+option(MODERN_RUNTIME_BUILD_KPI "Build standalone runtime KPI benchmarks and stress tests" OFF)
+if(MODERN_RUNTIME_BUILD_KPI)
+  add_executable(modern_runtime_benchmark benchmarks/runtime_benchmark.cpp)
+  target_link_libraries(modern_runtime_benchmark PRIVATE modern_runtime)
+  target_compile_features(modern_runtime_benchmark PRIVATE cxx_std_23)
+
+  add_executable(modern_runtime_stress tests/runtime_stress.cpp)
+  target_link_libraries(modern_runtime_stress PRIVATE modern_runtime)
+  target_compile_features(modern_runtime_stress PRIVATE cxx_std_23)
+  add_test(NAME modern_runtime_stress COMMAND modern_runtime_stress --iterations 10000)
+  set_tests_properties(modern_runtime_stress PROPERTIES TIMEOUT 120 LABELS "stress;kpi")
+endif()
