@@ -179,3 +179,6 @@ install(
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/${MODERN_RUNTIME_PACKAGE_NAME}Targets.cmake"
   DESTINATION "${MODERN_RUNTIME_INSTALL_CMAKEDIR}"
 )
+
+# Optional, standalone performance and stress harness.
+include(cmake/RuntimeKpi.cmake)
