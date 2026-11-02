@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.28)
 
 project(modern_runtime VERSION 0.1.0 LANGUAGES CXX)
 
+# GCC 13 cannot provide CMake C++23 named-module dependency discovery.
+# Report an actionable error before CMake reaches opaque try_compile failures.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+  message(FATAL_ERROR
+    "modern_runtime requires C++23 named-module dependency scanning; "
+    "GCC ${CMAKE_CXX_COMPILER_VERSION} is not supported by this build. "
+    "Configure a fresh build with Clang and clang-scan-deps, e.g. "
+    "cmake --preset kpi, or set -DCMAKE_CXX_COMPILER=/path/to/clang++. "
+    "CMake caches the compiler; use a fresh build directory when switching.")
+endif()
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -10,7 +21,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 set(MODERN_RUNTIME_PACKAGE_NAME modern_runtime)
 set(MODERN_RUNTIME_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_RUNTIME_PACKAGE_NAME}")
@@ -31,7 +41,11 @@ modern_runtime_resolve_trace_target(
 
 find_package(Threads REQUIRED)
 
+# Only production targets need module scanning. Do not apply it to
+# try_compile probes performed by FindThreads or dependencies above.
+
 add_library(modern_runtime)
+set_target_properties(modern_runtime PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
 target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 target_include_directories(modern_runtime PUBLIC
