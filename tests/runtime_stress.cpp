@@ -70,6 +70,9 @@ void test_concurrent_producers(std::size_t iterations)
   checkpoint("producers", "start: creating thread pool");
   modern::thread_pool pool{4, modern::memory::get_default_resource(), iterations + 64};
   std::atomic<std::size_t> observed{0};
+  std::vector<std::atomic<unsigned>> per_task(iterations);
+  for (auto& count : per_task)
+    count.store(0, std::memory_order_relaxed);
   std::atomic<std::size_t> submitted{0};
   std::latch finished(static_cast<std::ptrdiff_t>(iterations));
   std::vector<std::jthread> writers;
@@ -80,8 +83,9 @@ void test_concurrent_producers(std::size_t iterations)
     {
       for (std::size_t i = producer; i < iterations; i += producers)
       {
-        pool.execute([&]
+        pool.execute([&, i]
         {
+          per_task[i].fetch_add(1, std::memory_order_relaxed);
           observed.fetch_add(1, std::memory_order_relaxed);
           finished.count_down();
         });
@@ -100,21 +104,41 @@ void test_concurrent_producers(std::size_t iterations)
   pool.join();
   checkpoint("producers", "pool joined");
   require(observed.load() == iterations, "lost or duplicated tasks");
+  for (const auto& count : per_task)
+    require(count.load(std::memory_order_relaxed) == 1, "task did not execute exactly once");
 }
 
 void test_shutdown_drains()
 {
-  checkpoint("shutdown", "start: submitting 1000 tasks");
+  checkpoint("shutdown", "start: occupying all four workers");
   modern::thread_pool pool{4, modern::memory::get_default_resource(), 2048};
+  std::latch started{4};
+  std::latch release{1};
   std::atomic<int> observed{0};
+
+  for (int i = 0; i < 4; ++i)
+    pool.execute([&]
+    {
+      started.count_down();
+      release.wait();
+      observed.fetch_add(1, std::memory_order_relaxed);
+    });
+
+  started.wait();
+  checkpoint("shutdown", "workers occupied; submitting 1000 queued tasks");
   for (int i = 0; i < 1000; ++i)
     pool.execute([&] { observed.fetch_add(1, std::memory_order_relaxed); });
-  checkpoint("shutdown", "submitted; calling shutdown");
+
+  // The queue is provably nonempty when shutdown is called; this
+  // distinguishes actual drain behavior from a pool that happened to
+  // finish everything before shutdown.
+  checkpoint("shutdown", "1000 tasks queued; calling shutdown");
   pool.shutdown();
-  checkpoint("shutdown", "calling join");
+  checkpoint("shutdown", "releasing workers; calling join");
+  release.count_down();
   pool.join();
   checkpoint("shutdown", "pool joined");
-  require(observed.load() == 1000, "shutdown lost accepted tasks");
+  require(observed.load() == 1004, "shutdown lost accepted tasks");
 }
 
 void test_cancellation(std::size_t iterations)
