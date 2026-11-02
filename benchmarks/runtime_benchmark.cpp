@@ -9,6 +9,9 @@ import modern.runtime;
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <exception>
+#include <mutex>
+#include <semaphore>
 #include <latch>
 #include <memory_resource>
 #include <stdexcept>
@@ -82,6 +85,7 @@ struct options
   std::size_t threads = 4;
   std::size_t operations = 10000;
   std::size_t timer_samples = 128;
+  std::size_t producers = 4;
 };
 
 options parse(int argc, char** argv)
@@ -99,11 +103,13 @@ options parse(int argc, char** argv)
       result.operations = value;
     else if (key == "--timer-samples")
       result.timer_samples = value;
+    else if (key == "--producers")
+      result.producers = value;
     else
       throw std::invalid_argument("unknown option: " + key);
   }
-  if (result.threads > 256)
-    throw std::invalid_argument("thread count must be <= 256");
+  if (result.threads > 256 || result.producers > 256)
+    throw std::invalid_argument("threads and producers must be <= 256");
   return result;
 }
 
@@ -160,6 +166,110 @@ void measure_dispatch(modern::thread_pool& pool, counting_resource& resource,
   completed.wait();
   const auto ended = clock_type::now();
   report("pool_dispatch", threads, std::move(latencies), started, ended,
+         before, resource.snapshot());
+}
+
+
+// Single in-flight job measures enqueue-to-start without queue accumulation.
+// Still includes the pool's wakeup and the benchmark's semaphore handshake.
+void measure_single_flight(modern::thread_pool& pool, counting_resource& resource,
+                           std::size_t threads, std::size_t count)
+{
+  std::vector<std::int64_t> latencies(count);
+  std::binary_semaphore completed{0};
+  const auto before = resource.snapshot();
+  const auto started = clock_type::now();
+
+  for (std::size_t i = 0; i < count; ++i)
+  {
+    const auto submitted = clock_type::now();
+    pool.execute([&, i, submitted]
+    {
+      latencies[i] = elapsed_ns(submitted, clock_type::now());
+      completed.release();
+    });
+    completed.acquire();
+  }
+
+  const auto ended = clock_type::now();
+  report("pool_single_flight", threads, std::move(latencies), started, ended,
+         before, resource.snapshot());
+}
+
+// Fixed-size producer group. Measure this workload at the same number of
+// producers for each worker count; otherwise the scaling curves are confounded.
+void measure_multi_producer(modern::thread_pool& pool, counting_resource& resource,
+                            std::size_t threads, std::size_t producers, std::size_t count)
+{
+  std::vector<std::int64_t> latencies(count);
+  std::latch ready(static_cast<std::ptrdiff_t>(producers));
+  std::latch go{1};
+  std::latch completed(static_cast<std::ptrdiff_t>(count));
+  std::vector<std::jthread> writers;
+  std::mutex error_mutex;
+  std::exception_ptr first_error;
+
+  const auto before = resource.snapshot();
+  for (std::size_t p = 0; p < producers; ++p)
+  {
+    writers.emplace_back([&, p]
+    {
+      ready.count_down();
+      go.wait();
+      try
+      {
+        for (std::size_t i = p; i < count; i += producers)
+        {
+          const auto submitted = clock_type::now();
+          pool.execute([&, i, submitted]
+          {
+            latencies[i] = elapsed_ns(submitted, clock_type::now());
+            completed.count_down();
+          });
+        }
+      }
+      catch (...)
+      {
+        std::lock_guard lock(error_mutex);
+        if (!first_error)
+          first_error = std::current_exception();
+      }
+    });
+  }
+
+  ready.wait();
+  const auto started = clock_type::now();
+  go.count_down();
+  for (auto& writer : writers)
+    writer.join();
+  if (first_error)
+    std::rethrow_exception(first_error);
+  completed.wait();
+  const auto ended = clock_type::now();
+  report("pool_multi_producer", threads, std::move(latencies), started, ended,
+         before, resource.snapshot());
+}
+
+// Separates task submission/completion overhead from the .then() path.
+void measure_task_submit(modern::thread_pool& pool, counting_resource& resource,
+                         std::size_t threads, std::size_t count)
+{
+  std::vector<std::int64_t> latencies;
+  latencies.reserve(count);
+  const auto before = resource.snapshot();
+  const auto started = clock_type::now();
+
+  for (std::size_t i = 0; i < count; ++i)
+  {
+    const auto submitted = clock_type::now();
+    const auto result = modern::submit(pool, &resource, [] { return 42; }).get();
+    if (result != 42)
+      throw std::runtime_error("task submit produced incorrect result");
+    latencies.push_back(elapsed_ns(submitted, clock_type::now()));
+  }
+
+  const auto ended = clock_type::now();
+  report("task_submit", threads, std::move(latencies), started, ended,
          before, resource.snapshot());
 }
 
@@ -225,6 +335,10 @@ int main(int argc, char** argv)
                  "p50_ns,p95_ns,p99_ns,p999_ns,pmr_allocs_per_op,pmr_bytes_per_op\n";
 
     measure_dispatch(pool, resource, settings.threads, settings.operations);
+    measure_single_flight(pool, resource, settings.threads, settings.operations);
+    measure_multi_producer(pool, resource, settings.threads,
+                           settings.producers, settings.operations);
+    measure_task_submit(pool, resource, settings.threads, settings.operations);
     measure_task_roundtrip(pool, resource, settings.threads, settings.operations);
     measure_timer(timers, resource, settings.threads, settings.timer_samples);
 
