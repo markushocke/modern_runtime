@@ -4,11 +4,11 @@ module;
 #include "../detail/intrusive_queue.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
-#include <semaphore>
 #include <span>
 #include <stop_token>
 #include <thread>
@@ -118,7 +118,12 @@ private:
   std::atomic<std::size_t> pending_tasks_ = 0;
   std::atomic<std::size_t> next_queue_ = 0;
   std::atomic<bool> stopping_ = false;
-  std::counting_semaphore<> available_tasks_{0};
+  // Wait state is separate from the per-worker queue locks. A worker reserves
+  // a queued job before searching its local queue / stealing from peers.
+  // Both the counter and the wake predicate are protected by wake_mutex_.
+  std::mutex wake_mutex_;
+  std::condition_variable wake_cv_;
+  std::size_t ready_tasks_ = 0;
   std::pmr::vector<std::unique_ptr<worker_queue>> queues_;
   std::pmr::vector<std::jthread> workers_;
   std::pmr::vector<std::size_t> worker_affinity_;
