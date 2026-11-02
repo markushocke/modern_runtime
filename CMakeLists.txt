@@ -126,12 +126,16 @@ target_link_libraries(task_characterization PRIVATE modern_runtime)
 add_executable(stream_characterization tests/stream_characterization.cpp)
 target_link_libraries(stream_characterization PRIVATE modern_runtime)
 
+add_executable(move_only_function_test tests/move_only_function_test.cpp)
+set_target_properties(move_only_function_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME exec_smoke COMMAND exec_smoke)
   add_test(NAME smoke_test COMMAND smoke_test)
   add_test(NAME task_characterization COMMAND task_characterization)
   add_test(NAME stream_characterization COMMAND stream_characterization)
+  add_test(NAME move_only_function_test COMMAND move_only_function_test)
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
