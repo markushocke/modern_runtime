@@ -45,7 +45,7 @@ find_package(Threads REQUIRED)
 # this default for importers (tests, demos and KPI executables) as well.
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
-set(MODERN_RUNTIME_INLINE_CALLABLE_BYTES "32" CACHE STRING
+set(MODERN_RUNTIME_INLINE_CALLABLE_BYTES "48" CACHE STRING
   "Inline capacity for small scheduled callables (32 or 48 bytes)")
 set_property(CACHE MODERN_RUNTIME_INLINE_CALLABLE_BYTES PROPERTY STRINGS 32 48)
 if(NOT MODERN_RUNTIME_INLINE_CALLABLE_BYTES MATCHES "^(32|48)$")
