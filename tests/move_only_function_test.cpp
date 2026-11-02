@@ -66,6 +66,15 @@ struct large_move_only
   void operator()() { *output += *value; }
 };
 
+// This capture is designed to fit in a 48-byte erased model, but not 32.
+struct medium_callable
+{
+  std::array<std::uintptr_t, 3> payload{{1, 2, 3}};
+  int* output;
+
+  void operator()() { *output = static_cast<int>(payload[0] + payload[1] + payload[2]); }
+};
+
 struct alignas(64) aligned_callable
 {
   bool* aligned;
@@ -124,6 +133,26 @@ void test_heap_fallback()
   require(resource.allocations() == resource.deallocations(), "heap callable leaked");
 }
 
+void test_inline_boundary()
+{
+  counting_resource resource;
+  int output = 0;
+  {
+    modern::detail::move_only_function callable{&resource, medium_callable{{1, 2, 3}, &output}};
+#if MODERN_RUNTIME_INLINE_CALLABLE_BYTES == 32
+    require(resource.allocations() == 1, "32-byte inline capacity unexpectedly held medium callable");
+#elif MODERN_RUNTIME_INLINE_CALLABLE_BYTES == 48
+    require(resource.allocations() == 0, "48-byte inline capacity missed medium callable");
+#else
+#error "Unexpected MODERN_RUNTIME_INLINE_CALLABLE_BYTES"
+#endif
+    callable();
+    require(output == 6, "medium callable executed incorrectly");
+  }
+  require(resource.allocations() == resource.deallocations(),
+          "medium callable lifetime leak");
+}
+
 void test_alignment_and_exceptions()
 {
   counting_resource resource;
@@ -161,6 +190,7 @@ int main()
   {
     test_inline_move_only();
     test_heap_fallback();
+    test_inline_boundary();
     test_alignment_and_exceptions();
     std::cout << "PASS: move_only_function inline, PMR fallback and lifetime\n";
     return 0;
