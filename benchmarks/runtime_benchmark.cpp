@@ -86,6 +86,8 @@ struct options
   std::size_t operations = 10000;
   std::size_t timer_samples = 128;
   std::size_t producers = 4;
+  std::string workload = "all";
+  std::string pmr_mode = "counting";
 };
 
 options parse(int argc, char** argv)
@@ -96,6 +98,16 @@ options parse(int argc, char** argv)
     if (i + 1 >= argc)
       throw std::invalid_argument(std::string{"missing value for "} + argv[i]);
     std::string key{argv[i++]};
+    if (key == "--workload")
+    {
+      result.workload = argv[i];
+      continue;
+    }
+    if (key == "--pmr")
+    {
+      result.pmr_mode = argv[i];
+      continue;
+    }
     auto value = parse_positive(argv[i], key.c_str());
     if (key == "--threads")
       result.threads = value;
@@ -110,6 +122,15 @@ options parse(int argc, char** argv)
   }
   if (result.threads > 256 || result.producers > 256)
     throw std::invalid_argument("threads and producers must be <= 256");
+  if (result.workload != "all" && result.workload != "pool_dispatch" &&
+      result.workload != "pool_single_flight" &&
+      result.workload != "pool_multi_producer" &&
+      result.workload != "task_submit" &&
+      result.workload != "task_roundtrip" &&
+      result.workload != "timer_lateness")
+    throw std::invalid_argument("unknown workload: " + result.workload);
+  if (result.pmr_mode != "counting" && result.pmr_mode != "default")
+    throw std::invalid_argument("--pmr must be counting or default");
   return result;
 }
 
@@ -129,7 +150,8 @@ double percentile(const std::vector<std::int64_t>& sorted, double fraction)
 void report(const std::string& name, std::size_t threads,
             std::vector<std::int64_t> samples,
             clock_type::time_point start, clock_type::time_point end,
-            counting_resource::counters before, counting_resource::counters after)
+            counting_resource::counters before, counting_resource::counters after,
+            const char* pmr_mode)
 {
   std::sort(samples.begin(), samples.end());
   const auto total = samples.size();
@@ -142,11 +164,12 @@ void report(const std::string& name, std::size_t threads,
             << percentile(samples, 0.99) << ','
             << percentile(samples, 0.999) << ','
             << static_cast<double>(after.allocations - before.allocations) / total << ','
-            << static_cast<double>(after.bytes - before.bytes) / total << '\n';
+            << static_cast<double>(after.bytes - before.bytes) / total
+            << ',' << pmr_mode << '\n';
 }
 
 void measure_dispatch(modern::thread_pool& pool, counting_resource& resource,
-                      std::size_t threads, std::size_t count)
+                      std::size_t threads, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> latencies(count);
   std::latch completed(static_cast<std::ptrdiff_t>(count));
@@ -166,14 +189,14 @@ void measure_dispatch(modern::thread_pool& pool, counting_resource& resource,
   completed.wait();
   const auto ended = clock_type::now();
   report("pool_dispatch", threads, std::move(latencies), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 
 
 // Single in-flight job measures enqueue-to-start without queue accumulation.
 // Still includes the pool's wakeup and the benchmark's semaphore handshake.
 void measure_single_flight(modern::thread_pool& pool, counting_resource& resource,
-                           std::size_t threads, std::size_t count)
+                           std::size_t threads, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> latencies(count);
   std::binary_semaphore completed{0};
@@ -193,13 +216,13 @@ void measure_single_flight(modern::thread_pool& pool, counting_resource& resourc
 
   const auto ended = clock_type::now();
   report("pool_single_flight", threads, std::move(latencies), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 
 // Fixed-size producer group. Measure this workload at the same number of
 // producers for each worker count; otherwise the scaling curves are confounded.
 void measure_multi_producer(modern::thread_pool& pool, counting_resource& resource,
-                            std::size_t threads, std::size_t producers, std::size_t count)
+                            std::size_t threads, std::size_t producers, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> latencies(count);
   std::latch ready(static_cast<std::ptrdiff_t>(producers));
@@ -247,12 +270,12 @@ void measure_multi_producer(modern::thread_pool& pool, counting_resource& resour
   completed.wait();
   const auto ended = clock_type::now();
   report("pool_multi_producer", threads, std::move(latencies), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 
 // Separates task submission/completion overhead from the .then() path.
-void measure_task_submit(modern::thread_pool& pool, counting_resource& resource,
-                         std::size_t threads, std::size_t count)
+void measure_task_submit(modern::thread_pool& pool, counting_resource& resource, std::pmr::memory_resource* task_resource,
+                         std::size_t threads, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> latencies;
   latencies.reserve(count);
@@ -262,7 +285,7 @@ void measure_task_submit(modern::thread_pool& pool, counting_resource& resource,
   for (std::size_t i = 0; i < count; ++i)
   {
     const auto submitted = clock_type::now();
-    const auto result = modern::submit(pool, &resource, [] { return 42; }).get();
+    const auto result = modern::submit(pool, task_resource, [] { return 42; }).get();
     if (result != 42)
       throw std::runtime_error("task submit produced incorrect result");
     latencies.push_back(elapsed_ns(submitted, clock_type::now()));
@@ -270,11 +293,11 @@ void measure_task_submit(modern::thread_pool& pool, counting_resource& resource,
 
   const auto ended = clock_type::now();
   report("task_submit", threads, std::move(latencies), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 
-void measure_task_roundtrip(modern::thread_pool& pool, counting_resource& resource,
-                            std::size_t threads, std::size_t count)
+void measure_task_roundtrip(modern::thread_pool& pool, counting_resource& resource, std::pmr::memory_resource* task_resource,
+                            std::size_t threads, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> latencies;
   latencies.reserve(count);
@@ -285,7 +308,7 @@ void measure_task_roundtrip(modern::thread_pool& pool, counting_resource& resour
   for (std::size_t i = 0; i < count; ++i)
   {
     const auto submitted = clock_type::now();
-    const auto result = modern::submit(pool, &resource, [] { return 21; })
+    const auto result = modern::submit(pool, task_resource, [] { return 21; })
       .then([](int value) { return value * 2; }).get();
     if (result != 42)
       throw std::runtime_error("task continuation produced incorrect result");
@@ -294,11 +317,11 @@ void measure_task_roundtrip(modern::thread_pool& pool, counting_resource& resour
 
   const auto ended = clock_type::now();
   report("task_roundtrip", threads, std::move(latencies), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 
 void measure_timer(modern::scheduled_executor& timers, counting_resource& resource,
-                   std::size_t threads, std::size_t count)
+                   std::size_t threads, std::size_t count, const char* pmr_mode)
 {
   std::vector<std::int64_t> lateness;
   lateness.reserve(count);
@@ -318,7 +341,7 @@ void measure_timer(modern::scheduled_executor& timers, counting_resource& resour
 
   const auto ended = clock_type::now();
   report("timer_lateness", threads, std::move(lateness), started, ended,
-         before, resource.snapshot());
+         before, resource.snapshot(), pmr_mode);
 }
 }
 
@@ -329,18 +352,35 @@ int main(int argc, char** argv)
     const auto settings = parse(argc, argv);
     // +64 avoids intentional queue-limit rejection in the throughput workload.
     counting_resource resource;
-    modern::thread_pool pool{settings.threads, &resource, settings.operations + 64};
-    modern::scheduled_executor timers{pool, &resource};
+    std::pmr::memory_resource* task_resource =
+      settings.pmr_mode == "counting"
+        ? static_cast<std::pmr::memory_resource*>(&resource)
+        : std::pmr::new_delete_resource();
+    modern::thread_pool pool{settings.threads, task_resource, settings.operations + 64};
+    modern::scheduled_executor timers{pool, task_resource};
+    const auto want = [&](const char* name)
+    {
+      return settings.workload == "all" || settings.workload == name;
+    };
     std::cout << "workload,threads,operations,elapsed_ms,ops_per_second,"
-                 "p50_ns,p95_ns,p99_ns,p999_ns,pmr_allocs_per_op,pmr_bytes_per_op\n";
+                 "p50_ns,p95_ns,p99_ns,p999_ns,pmr_allocs_per_op,pmr_bytes_per_op,pmr_mode\n";
 
-    measure_dispatch(pool, resource, settings.threads, settings.operations);
-    measure_single_flight(pool, resource, settings.threads, settings.operations);
-    measure_multi_producer(pool, resource, settings.threads,
-                           settings.producers, settings.operations);
-    measure_task_submit(pool, resource, settings.threads, settings.operations);
-    measure_task_roundtrip(pool, resource, settings.threads, settings.operations);
-    measure_timer(timers, resource, settings.threads, settings.timer_samples);
+    const auto* mode = settings.pmr_mode.c_str();
+    if (want("pool_dispatch"))
+      measure_dispatch(pool, resource, settings.threads, settings.operations, mode);
+    if (want("pool_single_flight"))
+      measure_single_flight(pool, resource, settings.threads, settings.operations, mode);
+    if (want("pool_multi_producer"))
+      measure_multi_producer(pool, resource, settings.threads,
+                             settings.producers, settings.operations, mode);
+    if (want("task_submit"))
+      measure_task_submit(pool, resource, task_resource,
+                          settings.threads, settings.operations, mode);
+    if (want("task_roundtrip"))
+      measure_task_roundtrip(pool, resource, task_resource,
+                             settings.threads, settings.operations, mode);
+    if (want("timer_lateness"))
+      measure_timer(timers, resource, settings.threads, settings.timer_samples, mode);
 
     timers.shutdown();
     timers.join();
