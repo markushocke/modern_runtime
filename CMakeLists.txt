@@ -45,8 +45,17 @@ find_package(Threads REQUIRED)
 # this default for importers (tests, demos and KPI executables) as well.
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
+set(MODERN_RUNTIME_INLINE_CALLABLE_BYTES "32" CACHE STRING
+  "Inline capacity for small scheduled callables (32 or 48 bytes)")
+set_property(CACHE MODERN_RUNTIME_INLINE_CALLABLE_BYTES PROPERTY STRINGS 32 48)
+if(NOT MODERN_RUNTIME_INLINE_CALLABLE_BYTES MATCHES "^(32|48)$")
+  message(FATAL_ERROR "MODERN_RUNTIME_INLINE_CALLABLE_BYTES must be 32 or 48")
+endif()
+
 add_library(modern_runtime)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
+target_compile_definitions(modern_runtime PUBLIC
+  MODERN_RUNTIME_INLINE_CALLABLE_BYTES=${MODERN_RUNTIME_INLINE_CALLABLE_BYTES})
 target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 target_include_directories(modern_runtime PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/modules
@@ -128,6 +137,8 @@ target_link_libraries(stream_characterization PRIVATE modern_runtime)
 
 add_executable(move_only_function_test tests/move_only_function_test.cpp)
 set_target_properties(move_only_function_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+target_compile_definitions(move_only_function_test PRIVATE
+  MODERN_RUNTIME_INLINE_CALLABLE_BYTES=${MODERN_RUNTIME_INLINE_CALLABLE_BYTES})
 
 include(CTest)
 if(BUILD_TESTING)
