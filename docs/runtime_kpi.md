@@ -55,14 +55,12 @@ The tool prints CSV. `pool_dispatch` can show high throughput and high per-task 
 
 The thread pool scheduler uses `modern::detail::move_only_function`. The original
 implementation allocated **every** scheduled callable through a PMR resource.
-The current optimization keeps nothrow-movable callables up to 48 bytes
+The experimental optimization keeps nothrow-movable callables up to a configurable capacity
 (including their type-erasure model) inline. Large, over-aligned, or
 potentially-throwing-move callables retain the original PMR-backed fallback.
 The public scheduling API is unchanged. An explicit PMR resource is honored\nfor callables that need allocation; it is not required to receive an\nallocation for inline-stored callables. `exec_smoke` therefore tests both\ninline no-allocation and large-capture PMR propagation.
 
-**Trade-off:** `move_only_function` itself now occupies more space (80 bytes
-on the local x86-64 toolchain), so queue density and cache behavior may worsen
-at high load. This optimization is **not** accepted on allocation counts alone.
+**Trade-off:** enlarging `move_only_function` can reduce PMR call counts while increasing the memory needed for `std::pmr::deque` queue blocks and hurting cache locality. At 48-byte SBO, the initial v3 measurements showed about 84% fewer PMR allocation calls for direct pool-dispatch, but around 40% more PMR allocated bytes and no reliable throughput improvement. The 32-byte candidate is experimental. This optimization is **not** accepted on allocation counts alone.
 
 Regression test: `ctest --test-dir build/kpi -R move_only_function_test
 --output-on-failure`. The test covers inline no-allocation behavior, PMR
@@ -74,3 +72,30 @@ To evaluate on the same machine, run the full CTest suite and then repeat
 percentiles, `pmr_allocs_per_op` and `task_roundtrip`. A regression in
 throughput or long-tail latency is a reason to reduce or disable inline size;
 a decrease in PMR allocations alone is not sufficient to merge.
+
+## Controlled SBO experiment (v4)
+
+Run `bash scripts/run_kpi_ab.sh`. This configures and tests two independent
+Release builds (`kpi-sbo32` and `kpi-sbo48`), then writes a single
+`kpi-ab.zip` containing five repeated runs for three worker counts and five
+workloads, separately measuring counting-PMR and native-PMR modes.
+
+The new benchmark options are:
+- `--workload pool_dispatch|pool_single_flight|pool_multi_producer|task_submit|task_roundtrip|timer_lateness|all`
+- `--pmr counting|default`. The `default` mode uses
+  `std::pmr::new_delete_resource()` without a counting wrapper.
+  The `pmr_allocs_per_op` and `pmr_bytes_per_op` CSV columns report
+  zero in this mode **because they are not instrumented**, not because
+  no allocations occurred. The `pmr_mode` CSV column makes that explicit.
+
+Each workload is run in a fresh process. The order of SBO capacities alternates
+between runs to reduce order bias. Never compare `--pmr default` counts to
+`--pmr counting` counts. Use the uninstrumented timings as the main performance
+signal and the counting-PMR run only for allocation cost analysis. Since v2/v3
+ran all workloads sequentially in one process, they are **not** a matched
+baseline for the isolated v4 numbers.
+
+The build setting `MODERN_RUNTIME_INLINE_CALLABLE_BYTES=32|48` is PUBLIC:
+runtime objects and consumers must agree on the same value because it affects
+the internal callable's C++ layout. This is a benchmark-only choice pending
+final acceptance; avoid mixing objects from different builds.
