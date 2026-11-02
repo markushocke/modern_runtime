@@ -45,7 +45,8 @@
       "name": "kpi",
       "inherits": "release",
       "cacheVariables": {
-        "MODERN_RUNTIME_BUILD_KPI": "ON"
+        "MODERN_RUNTIME_BUILD_KPI": "ON",
+        "MODERN_RUNTIME_INLINE_CALLABLE_BYTES": "48"
       }
     },
     {
