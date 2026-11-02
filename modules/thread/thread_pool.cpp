@@ -91,30 +91,31 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
           pending + 1,
           std::memory_order_acq_rel,
           std::memory_order_relaxed))
-    {
       break;
-    }
   }
 
   const auto queue_count = queues_.size();
   std::size_t queue_index = 0;
 
   if (current_thread_pool == this && current_worker_index < queue_count)
-  {
     queue_index = current_worker_index;
-  }
   else if (queue_count != 0)
-  {
     queue_index = next_queue_.fetch_add(1, std::memory_order_relaxed) % queue_count;
-  }
 
   {
     auto& queue = *queues_[queue_index];
-    std::lock_guard lock(queue.mutex);
+    std::lock_guard queue_lock(queue.mutex);
 
-    if (stopping_.load(std::memory_order_relaxed))
+    // An accepted submission may still lose the race with shutdown.
+    // Publish the rollback while holding wake_mutex_ so a worker cannot
+    // miss the transition to "stopping and no pending work".
+    if (stopping_.load(std::memory_order_acquire))
     {
-      pending_tasks_.fetch_sub(1, std::memory_order_release);
+      {
+        std::lock_guard wake_lock(wake_mutex_);
+        pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
+      }
+      wake_cv_.notify_all();
       throw std::runtime_error("thread_pool is stopping");
     }
 
@@ -124,22 +125,37 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
     }
     catch (...)
     {
-      pending_tasks_.fetch_sub(1, std::memory_order_release);
+      {
+        std::lock_guard wake_lock(wake_mutex_);
+        pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
+      }
+      wake_cv_.notify_all();
       throw;
+    }
+
+    // The worker may only reserve work that is already in a queue.
+    // Never update this predicate outside the wait mutex.
+    {
+      std::lock_guard wake_lock(wake_mutex_);
+      ++ready_tasks_;
     }
   }
 
-  available_tasks_.release();
+  wake_cv_.notify_one();
 }
 
 void thread_pool_state::shutdown() noexcept
 {
-  stopping_.store(true, std::memory_order_release);
+  {
+    std::lock_guard wake_lock(wake_mutex_);
+    stopping_.store(true, std::memory_order_release);
+  }
 
   for (auto& worker : workers_)
     worker.request_stop();
 
-  available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+  // Wakes every idle worker; workers that still have accepted work drain it.
+  wake_cv_.notify_all();
 }
 
 void thread_pool_state::join()
