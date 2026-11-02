@@ -40,6 +40,20 @@
         "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
+    },
+    {
+      "name": "kpi",
+      "inherits": "release",
+      "cacheVariables": {
+        "MODERN_RUNTIME_BUILD_KPI": "ON"
+      }
+    },
+    {
+      "name": "kpi-sanitize",
+      "inherits": "sanitize",
+      "cacheVariables": {
+        "MODERN_RUNTIME_BUILD_KPI": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -54,6 +68,14 @@
     {
       "name": "sanitize",
       "configurePreset": "sanitize"
+    },
+    {
+      "name": "kpi",
+      "configurePreset": "kpi"
+    },
+    {
+      "name": "kpi-sanitize",
+      "configurePreset": "kpi-sanitize"
     }
   ]
 }
