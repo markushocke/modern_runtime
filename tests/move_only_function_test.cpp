@@ -92,7 +92,9 @@ void test_inline_move_only()
     modern::detail::move_only_function third;
     third = std::move(second);
     require(!second && third, "move assignment invalidated callable");
-    third = std::move(third);
+    // Exercise self-move via an alias without triggering compiler self-move warnings.
+    auto& same = third;
+    third = std::move(same);
     third();
     require(observed == 42, "self-move assignment broke callable");
   }
