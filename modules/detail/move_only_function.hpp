@@ -183,7 +183,8 @@ private:
     resource_ = std::pmr::get_default_resource();
   }
 
-  alignas(std::max_align_t) std::byte inline_storage_[inline_bytes]{};
+  // Initialized only when an inline object is constructed.
+  alignas(std::max_align_t) std::byte inline_storage_[inline_bytes];
   concept_t* self_ = nullptr;
   std::pmr::memory_resource* resource_ = std::pmr::get_default_resource();
   bool inline_ = false;
