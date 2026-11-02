@@ -10,6 +10,8 @@ module;
 #include <cstddef>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
+#include <utility>
 #include <span>
 #include <stdexcept>
 #include <stop_token>
