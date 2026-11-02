@@ -4,7 +4,8 @@ module;
 #include "../detail/intrusive_queue.hpp"
 
 #include <atomic>
-#include <condition_variable>
+#include <limits>
+#include <semaphore>
 #include <cstddef>
 #include <memory>
 #include <memory_resource>
@@ -109,21 +110,22 @@ public:
   void join();
 
 private:
+  static constexpr std::size_t stop_bit =
+    std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
+  static constexpr std::size_t pending_mask = stop_bit - 1;
+
+  void finish_pending_slot() noexcept;
+
   [[nodiscard]] move_only_function pop_local_task(std::size_t worker_index);
   [[nodiscard]] move_only_function steal_task(std::size_t worker_index);
   void worker_loop(std::size_t worker_index, std::stop_token stop_token);
 
   std::pmr::memory_resource* resource_;
   std::size_t max_pending_tasks_;
-  std::atomic<std::size_t> pending_tasks_ = 0;
-  std::atomic<std::size_t> next_queue_ = 0;
-  std::atomic<bool> stopping_ = false;
-  // Wait state is separate from the per-worker queue locks. A worker reserves
-  // a queued job before searching its local queue / stealing from peers.
-  // Both the counter and the wake predicate are protected by wake_mutex_.
-  std::mutex wake_mutex_;
-  std::condition_variable wake_cv_;
-  std::size_t ready_tasks_ = 0;
+  // High bit: shutdown. Remaining bits: accepted but not yet claimed tasks.
+  std::atomic<std::size_t> work_state_{0};
+  std::atomic<std::size_t> next_queue_{0};
+  std::counting_semaphore<> available_tasks_{0};
   std::pmr::vector<std::unique_ptr<worker_queue>> queues_;
   std::pmr::vector<std::jthread> workers_;
   std::pmr::vector<std::size_t> worker_affinity_;

@@ -1,7 +1,8 @@
 module;
 
 #include <atomic>
-#include <condition_variable>
+#include <exception>
+#include <semaphore>
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/intrusive_queue.hpp"
 
@@ -37,52 +38,26 @@ public:
 void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token stop_token)
 {
   worker_context context{this, worker_index};
-  (void)stop_token; // shutdown() owns the drain policy, not jthread stop requests.
+  (void)stop_token; // Shutdown and draining are controlled by work_state_.
 
   while (true)
   {
-    {
-      std::unique_lock wake_lock(wake_mutex_);
-      wake_cv_.wait(wake_lock, [this]
-      {
-        return ready_tasks_ != 0 ||
-               (stopping_.load(std::memory_order_acquire) &&
-                pending_tasks_.load(std::memory_order_acquire) == 0);
-      });
+    available_tasks_.acquire();
 
-      if (ready_tasks_ == 0)
-        return; // shutdown and all accepted queued work has been claimed
-
-      // Reserve one queued job while holding the same lock as enqueue.
-      --ready_tasks_;
-    }
+    const auto state = work_state_.load(std::memory_order_acquire);
+    if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
+      return;
 
     auto task = pop_local_task(worker_index);
     if (!task)
       task = steal_task(worker_index);
 
+    // One published task corresponds to exactly one semaphore permit.
     if (!task)
-    {
-      // Defensive recovery: another worker cannot consume more than its
-      // reservations, so normally at least one queued job must exist.
-      // Do not silently discard a wake-up on a transient empty scan.
-      {
-        std::lock_guard wake_lock(wake_mutex_);
-        ++ready_tasks_;
-      }
-      wake_cv_.notify_one();
-      continue;
-    }
+      std::terminate();
 
-    std::size_t previous_pending;
-    {
-      std::lock_guard wake_lock(wake_mutex_);
-      previous_pending = pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
-    }
-
-    if (previous_pending == 1 && stopping_.load(std::memory_order_acquire))
-      wake_cv_.notify_all();
-
+    // The slot is released after dequeue, not after user-code execution.
+    finish_pending_slot();
     task();
   }
 }

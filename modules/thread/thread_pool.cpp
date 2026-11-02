@@ -1,7 +1,7 @@
 module;
 
 #include <atomic>
-#include <condition_variable>
+#include <semaphore>
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/shared_ptr.hpp"
 
@@ -31,7 +31,9 @@ thread_pool_state::thread_pool_state(
   std::size_t max_pending_tasks,
   std::span<const std::size_t> worker_affinity)
   : resource_(resource ? resource : std::pmr::get_default_resource()),
-    max_pending_tasks_(max_pending_tasks ? max_pending_tasks : 1),
+    max_pending_tasks_(max_pending_tasks == 0
+      ? 1
+      : (max_pending_tasks > pending_mask ? pending_mask : max_pending_tasks)),
     queues_(resource_),
     workers_(resource_),
     worker_affinity_(worker_affinity.begin(), worker_affinity.end(), resource_)
@@ -77,88 +79,65 @@ void thread_pool_state::start(std::size_t thread_count)
   }
 }
 
+void thread_pool_state::finish_pending_slot() noexcept
+{
+  const auto previous = work_state_.fetch_sub(1, std::memory_order_acq_rel);
+  if ((previous & stop_bit) != 0 && (previous & pending_mask) == 1)
+    available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+}
+
 void thread_pool_state::execute(move_only_function task, scheduler_priority priority)
 {
-  if (stopping_.load(std::memory_order_acquire))
-    throw std::runtime_error("thread_pool is stopping");
+  if (!task)
+    throw std::invalid_argument("cannot schedule an empty task");
 
-  auto pending = pending_tasks_.load(std::memory_order_relaxed);
-
+  auto state = work_state_.load(std::memory_order_relaxed);
   while (true)
   {
-    if (pending >= max_pending_tasks_)
+    if ((state & stop_bit) != 0)
+      throw std::runtime_error("thread_pool is stopping");
+
+    if ((state & pending_mask) >= max_pending_tasks_)
       throw std::runtime_error("thread_pool queue is full");
 
-    if (pending_tasks_.compare_exchange_weak(
-          pending,
-          pending + 1,
-          std::memory_order_acq_rel,
+    if (work_state_.compare_exchange_weak(
+          state, state + 1, std::memory_order_acq_rel,
           std::memory_order_relaxed))
       break;
   }
 
   const auto queue_count = queues_.size();
   std::size_t queue_index = 0;
-
   if (current_thread_pool == this && current_worker_index < queue_count)
     queue_index = current_worker_index;
   else if (queue_count != 0)
     queue_index = next_queue_.fetch_add(1, std::memory_order_relaxed) % queue_count;
 
+  try
   {
     auto& queue = *queues_[queue_index];
-    std::lock_guard queue_lock(queue.mutex);
-
-    // An accepted submission may still lose the race with shutdown.
-    // Publish the rollback while holding wake_mutex_ so a worker cannot
-    // miss the transition to "stopping and no pending work".
-    if (stopping_.load(std::memory_order_acquire))
-    {
-      {
-        std::lock_guard wake_lock(wake_mutex_);
-        pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
-      }
-      wake_cv_.notify_all();
-      throw std::runtime_error("thread_pool is stopping");
-    }
-
-    try
-    {
-      queue.push(std::move(task), priority);
-    }
-    catch (...)
-    {
-      {
-        std::lock_guard wake_lock(wake_mutex_);
-        pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
-      }
-      wake_cv_.notify_all();
-      throw;
-    }
-
-    // The worker may only reserve work that is already in a queue.
-    // Never update this predicate outside the wait mutex.
-    {
-      std::lock_guard wake_lock(wake_mutex_);
-      ++ready_tasks_;
-    }
+    std::lock_guard lock(queue.mutex);
+    // A submission already reserved before shutdown is drained normally.
+    queue.push(std::move(task), priority);
+  }
+  catch (...)
+  {
+    finish_pending_slot();
+    throw;
   }
 
-  wake_cv_.notify_one();
+  // Only published tasks have semaphore permits.
+  available_tasks_.release();
 }
 
 void thread_pool_state::shutdown() noexcept
 {
-  {
-    std::lock_guard wake_lock(wake_mutex_);
-    stopping_.store(true, std::memory_order_release);
-  }
+  const auto previous = work_state_.fetch_or(stop_bit, std::memory_order_acq_rel);
+  if ((previous & stop_bit) == 0 && (previous & pending_mask) == 0)
+    available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
 
   for (auto& worker : workers_)
     worker.request_stop();
-
-  // Wakes every idle worker; workers that still have accepted work drain it.
-  wake_cv_.notify_all();
 }
 
 void thread_pool_state::join()
