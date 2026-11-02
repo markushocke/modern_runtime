@@ -60,7 +60,7 @@ The experimental optimization keeps nothrow-movable callables up to a configurab
 potentially-throwing-move callables retain the original PMR-backed fallback.
 The public scheduling API is unchanged. An explicit PMR resource is honored\nfor callables that need allocation; it is not required to receive an\nallocation for inline-stored callables. `exec_smoke` therefore tests both\ninline no-allocation and large-capture PMR propagation.
 
-**Trade-off:** enlarging `move_only_function` can reduce PMR call counts while increasing the memory needed for `std::pmr::deque` queue blocks and hurting cache locality. At 48-byte SBO, the initial v3 measurements showed about 84% fewer PMR allocation calls for direct pool-dispatch, but around 40% more PMR allocated bytes and no reliable throughput improvement. The 32-byte candidate is experimental. This optimization is **not** accepted on allocation counts alone.
+**Trade-off:** enlarging `move_only_function` can reduce PMR call counts while increasing the memory needed for `std::pmr::deque` queue blocks and hurting cache locality. At 48-byte SBO, the initial v3 measurements showed about 84% fewer PMR allocation calls for direct pool-dispatch, but around 40% more PMR allocated bytes and no reliable throughput improvement. The 32-byte candidate remains experimental. This optimization is **not** accepted on allocation counts alone.
 
 Regression test: `ctest --test-dir build/kpi -R move_only_function_test
 --output-on-failure`. The test covers inline no-allocation behavior, PMR
@@ -99,3 +99,35 @@ The build setting `MODERN_RUNTIME_INLINE_CALLABLE_BYTES=32|48` is PUBLIC:
 runtime objects and consumers must agree on the same value because it affects
 the internal callable's C++ layout. This is a benchmark-only choice pending
 final acceptance; avoid mixing objects from different builds.
+
+### Paired 32/48-byte A/B results, 2026-11-02
+
+The 300 CSV files in `kpi-ab.zip` cover five runs for each of five workloads,
+three worker counts, two inline sizes, and two PMR modes.
+
+At **four workers** with counting PMR, five-run medians were:
+
+| Workload | 32 B: PMR allocations/op | 48 B: PMR allocations/op | 32 B: PMR bytes/op | 48 B: PMR bytes/op |
+|---|---:|---:|---:|---:|
+| Pool dispatch | 1.123 | 0.178 | 103 | 85 |
+| Four producer dispatch | 1.126 | 0.168 | 105 | 81 |
+| Single-flight dispatch | 1.132 | 0.205 | 107 | 98 |
+| Task submit | 2.062 | 2.166 | 384 | 432 |
+| Task + continuation | 12.117 | 12.266 | 2,094 | 2,186 |
+
+The uninstrumented throughput at four workers (operations/s, 32 vs 48 B):
+pool_dispatch 101,454 vs 136,234; pool_multi_producer 727,088 vs 653,009;
+pool_single_flight 71,294 vs 89,176; task_submit 12,229 vs 14,652;
+task_roundtrip 10,527 vs 10,233.
+
+**Decision:** restore 48 bytes as the default because it has substantially fewer
+PMR allocations and allocated bytes in the pool-dispatch workloads. Keep 32-byte
+as an opt-in experiment. **No proven throughput advantage:** timing results
+vary widely between individual runs and show inconsistent winners. The A/B test
+also demonstrates that reducing SBO to 32 can *increase* total PMR allocated
+bytes through per-callable heap fallback. Do not claim a scheduling scalability
+improvement from this experiment.
+
+**Next:** stabilize CPU affinity / environmental conditions, then benchmark the
+shared wake mutex, wakeups and work-stealing under matched load. Fixing thread
+pool contention is higher priority than optimizing SBO size further.
