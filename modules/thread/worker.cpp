@@ -36,39 +36,51 @@ public:
 void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token stop_token)
 {
   worker_context context{this, worker_index};
+  (void)stop_token; // shutdown() owns the drain policy, not jthread stop requests.
 
   while (true)
   {
-    available_tasks_.acquire();
-
-    if ((stopping_.load(std::memory_order_acquire) || stop_token.stop_requested()) &&
-        pending_tasks_.load(std::memory_order_acquire) == 0)
     {
-      return;
+      std::unique_lock wake_lock(wake_mutex_);
+      wake_cv_.wait(wake_lock, [this]
+      {
+        return ready_tasks_ != 0 ||
+               (stopping_.load(std::memory_order_acquire) &&
+                pending_tasks_.load(std::memory_order_acquire) == 0);
+      });
+
+      if (ready_tasks_ == 0)
+        return; // shutdown and all accepted queued work has been claimed
+
+      // Reserve one queued job while holding the same lock as enqueue.
+      --ready_tasks_;
     }
 
     auto task = pop_local_task(worker_index);
-
     if (!task)
       task = steal_task(worker_index);
 
     if (!task)
     {
-      if (stopping_.load(std::memory_order_acquire) || stop_token.stop_requested())
-        return;
-
+      // Defensive recovery: another worker cannot consume more than its
+      // reservations, so normally at least one queued job must exist.
+      // Do not silently discard a wake-up on a transient empty scan.
+      {
+        std::lock_guard wake_lock(wake_mutex_);
+        ++ready_tasks_;
+      }
+      wake_cv_.notify_one();
       continue;
     }
 
-    pending_tasks_.fetch_sub(1, std::memory_order_release);
-
-    if (!task)
+    std::size_t previous_pending;
     {
-      if (stopping_.load(std::memory_order_acquire) || stop_token.stop_requested())
-        return;
-
-      continue;
+      std::lock_guard wake_lock(wake_mutex_);
+      previous_pending = pending_tasks_.fetch_sub(1, std::memory_order_acq_rel);
     }
+
+    if (previous_pending == 1 && stopping_.load(std::memory_order_acquire))
+      wake_cv_.notify_all();
 
     task();
   }
