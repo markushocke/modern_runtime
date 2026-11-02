@@ -50,3 +50,27 @@ Stress tests are separated into CTests `modern_runtime_stress_producers`, `moder
 ## Interpreting results
 
 The tool prints CSV. `pool_dispatch` can show high throughput and high per-task delay simultaneously because it measures queueing. Do not interpret `pool_multi_producer` as linear scaling until there is an independent reference/baseline and repeat-run variation. `task_submit` isolates fixed Task overhead from the additional `.then()` composition. Sequential 2-ms timers are a jitter benchmark, **not** a timer capacity or maximum-operations-per-second benchmark. No acceptance threshold should be introduced before the baseline is statistically stable.
+
+## Optimization checkpoint: small callable storage
+
+The thread pool scheduler uses `modern::detail::move_only_function`. The original
+implementation allocated **every** scheduled callable through a PMR resource.
+The current optimization keeps nothrow-movable callables up to 48 bytes
+(including their type-erasure model) inline. Large, over-aligned, or
+potentially-throwing-move callables retain the original PMR-backed fallback.
+The public scheduling API is unchanged.
+
+**Trade-off:** `move_only_function` itself now occupies more space (80 bytes
+on the local x86-64 toolchain), so queue density and cache behavior may worsen
+at high load. This optimization is **not** accepted on allocation counts alone.
+
+Regression test: `ctest --test-dir build/kpi -R move_only_function_test
+--output-on-failure`. The test covers inline no-allocation behavior, PMR
+fallback and deallocation, alignment, move-only capture, moves and exceptions.
+
+To evaluate on the same machine, run the full CTest suite and then repeat
+`kpi-v2` workload parameters with five runs per worker count. Compare
+`pool_dispatch` and `pool_multi_producer` throughput, queue-latency
+percentiles, `pmr_allocs_per_op` and `task_roundtrip`. A regression in
+throughput or long-tail latency is a reason to reduce or disable inline size;
+a decrease in PMR allocations alone is not sufficient to merge.
