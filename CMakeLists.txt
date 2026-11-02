@@ -41,11 +41,11 @@ modern_runtime_resolve_trace_target(
 
 find_package(Threads REQUIRED)
 
-# Only production targets need module scanning. Do not apply it to
-# try_compile probes performed by FindThreads or dependencies above.
+# Enable module scanning only after compiler/threads probes. CMake uses
+# this default for importers (tests, demos and KPI executables) as well.
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 add_library(modern_runtime)
-set_target_properties(modern_runtime PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
 target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 target_include_directories(modern_runtime PUBLIC
