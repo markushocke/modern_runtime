@@ -1,6 +1,7 @@
 module;
 
 #include <atomic>
+#include <condition_variable>
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/intrusive_queue.hpp"
 
