@@ -73,7 +73,7 @@ public:
   }
 
 private:
-  static constexpr std::size_t inline_bytes = 48;
+  static constexpr std::size_t inline_bytes = 32;
 
   struct concept_t
   {
