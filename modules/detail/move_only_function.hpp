@@ -76,7 +76,7 @@ private:
   #if defined(MODERN_RUNTIME_INLINE_CALLABLE_BYTES)
   static constexpr std::size_t inline_bytes = MODERN_RUNTIME_INLINE_CALLABLE_BYTES;
 #else
-  static constexpr std::size_t inline_bytes = 32;
+  static constexpr std::size_t inline_bytes = 48;
 #endif
 
   struct concept_t
