@@ -39,3 +39,7 @@ The current stress executable checks multi-producer exactly-once completion, acc
 ## Compiler selection
 
 CMake caches the selected compiler. A previous `build-kpi` directory configured with `/usr/bin/c++` (GCC 13) cannot be switched to Clang merely by rerunning configure. The `kpi` preset uses its own `build/kpi` directory and selects `clang++`; check `command -v clang++ clang-scan-deps` and `clang++ --version`. If the machine has several versions, use `-DCMAKE_CXX_COMPILER=/usr/local/bin/clang++` or an explicit versioned Clang binary in a **new** build directory. GCC 13 is rejected with a clear configuration error because its C++ modules dependency scanning is not usable with this project's CMake setup.
+
+## Diagnosing stress timeouts
+
+Stress tests are separated into CTests `modern_runtime_stress_producers`, `modern_runtime_stress_shutdown`, and `modern_runtime_stress_cancellation`, each with a 45-second timeout. Each scenario prints flushed progress checkpoints to stderr before blocking operations, so `ctest --output-on-failure -R '^modern_runtime_stress_'` identifies the stuck phase. A timeout is a failure, not proof of a thread-pool defect until the stuck phase and stack traces are inspected. To isolate a case interactively, run `./build/kpi/modern_runtime_stress --case producers --iterations 1000` (or `shutdown`, `cancellation`).
