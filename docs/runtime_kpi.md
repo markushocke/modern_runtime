@@ -58,7 +58,7 @@ implementation allocated **every** scheduled callable through a PMR resource.
 The current optimization keeps nothrow-movable callables up to 48 bytes
 (including their type-erasure model) inline. Large, over-aligned, or
 potentially-throwing-move callables retain the original PMR-backed fallback.
-The public scheduling API is unchanged.
+The public scheduling API is unchanged. An explicit PMR resource is honored\nfor callables that need allocation; it is not required to receive an\nallocation for inline-stored callables. `exec_smoke` therefore tests both\ninline no-allocation and large-capture PMR propagation.
 
 **Trade-off:** `move_only_function` itself now occupies more space (80 bytes
 on the local x86-64 toolchain), so queue density and cache behavior may worsen
