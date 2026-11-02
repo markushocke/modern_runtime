@@ -1,19 +1,18 @@
 # Runtime KPI audit
 
 This optional harness measures **runtime behavior**, not application-level performance.
-Build with `-DMODERN_RUNTIME_BUILD_KPI=ON` (requires C++23 modules and the project's existing dependencies).
-Register it by adding `include(cmake/RuntimeKpi.cmake)` near the end of the root CMakeLists.txt.
+Build with the project's Clang-based `kpi` preset (requires C++23 named-module support and `clang-scan-deps`). The KPI targets are registered automatically when the option is enabled.
 
 ## Commands
 
 ```bash
-cmake -S . -B build-kpi -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODERN_RUNTIME_BUILD_KPI=ON
-cmake --build build-kpi --parallel
-ctest --test-dir build-kpi --output-on-failure
+cmake --preset kpi
+cmake --build --preset kpi --parallel
+ctest --test-dir build/kpi --output-on-failure
 for t in 1 2 4 8 16; do
-  ./build-kpi/modern_runtime_benchmark --threads "$t" --operations 10000 --timer-samples 128 > "kpi-${t}.csv"
+  ./build/kpi/modern_runtime_benchmark --threads "$t" --operations 10000 --timer-samples 128 > "kpi-${t}.csv"
 done
-./build-kpi/modern_runtime_stress --iterations 1000000
+./build/kpi/modern_runtime_stress --iterations 1000000
 ```
 
 ## Definitions
@@ -36,3 +35,7 @@ Use Release builds, a quiet dedicated machine, fixed CPU governor and affinity, 
 4. Adoption: independent projects and feedback, not GitHub stars alone.
 
 The current stress executable checks multi-producer exactly-once completion, accepted-task shutdown draining, and pre-cancelled tasks. It does **not** yet prove all race/lifetime invariants or provide a 24-hour soak test. No benchmark results are claimed until run on a validated build.
+
+## Compiler selection
+
+CMake caches the selected compiler. A previous `build-kpi` directory configured with `/usr/bin/c++` (GCC 13) cannot be switched to Clang merely by rerunning configure. The `kpi` preset uses its own `build/kpi` directory and selects `clang++`; check `command -v clang++ clang-scan-deps` and `clang++ --version`. If the machine has several versions, use `-DCMAKE_CXX_COMPILER=/usr/local/bin/clang++` or an explicit versioned Clang binary in a **new** build directory. GCC 13 is rejected with a clear configuration error because its C++ modules dependency scanning is not usable with this project's CMake setup.
