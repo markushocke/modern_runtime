@@ -1041,6 +1041,18 @@ task<T> make_task(std::shared_ptr<void> state)
   return task<T>{std::static_pointer_cast<shared_state<T>>(std::move(state))};
 }
 
+// A coroutine returned by a handler can retain the handler's this pointer.
+// Keep asynchronous handlers in the composition frame until flattening ends.
+// Synchronous handlers retain their existing move/lifetime behavior.
+template<class Result, class F>
+auto composition_callable(F& fn)
+{
+  if constexpr (is_task_v<Result>)
+    return std::ref(fn);
+  else
+    return std::move(fn);
+}
+
 template<class T, class F>
 task<typename continuation_result<T, F>::type> compose_then(
   task<T> parent, scheduler executor, memory::memory_resource* resource, F fn)
@@ -1053,12 +1065,12 @@ task<typename continuation_result<T, F>::type> compose_then(
     co_await std::move(parent);
     if constexpr (std::is_void_v<raw_type>)
     {
-      co_await submit(executor, resource, std::move(fn));
+      co_await submit(executor, resource, composition_callable<raw_type>(fn));
       co_return;
     }
     else
     {
-      auto raw = co_await submit(executor, resource, std::move(fn));
+      auto raw = co_await submit(executor, resource, composition_callable<raw_type>(fn));
       if constexpr (is_task_v<raw_type>)
       {
         if constexpr (std::is_void_v<result_type>)
@@ -1076,10 +1088,15 @@ task<typename continuation_result<T, F>::type> compose_then(
   else
   {
     auto value = co_await std::move(parent);
-    auto invoke = [fn = std::move(fn), value = std::move(value)]() mutable -> raw_type
+    auto invoke = [&]
     {
-      return std::invoke(fn, std::move(value));
-    };
+      if constexpr (is_task_v<raw_type>)
+        // A handler may borrow its input by reference across suspension too.
+        return [&fn, &value]() -> raw_type { return std::invoke(fn, std::move(value)); };
+      else
+        return [fn = std::move(fn), value = std::move(value)]() mutable -> raw_type
+        { return std::invoke(fn, std::move(value)); };
+    }();
 
     if constexpr (std::is_void_v<raw_type>)
     {
@@ -1139,10 +1156,14 @@ task<T> compose_catching(
   static_assert(std::same_as<task_unwrap_t<raw_type>, T>,
     "catching handler must return T, void, or task<T>");
 
-  auto invoke = [fn = std::move(fn), exception]() mutable -> raw_type
+  auto invoke = [&]
   {
-    return std::invoke(fn, exception);
-  };
+    if constexpr (is_task_v<raw_type>)
+      return [&fn, &exception]() -> raw_type { return std::invoke(fn, exception); };
+    else
+      return [fn = std::move(fn), exception]() mutable -> raw_type
+      { return std::invoke(fn, exception); };
+  }();
 
   if constexpr (std::is_void_v<raw_type>)
   {
@@ -1194,10 +1215,10 @@ task<T> compose_finally(
     "finally handler must return void or task<void>");
 
   if constexpr (std::is_void_v<raw_type>)
-    co_await submit(executor, resource, std::move(fn));
+    co_await submit(executor, resource, composition_callable<raw_type>(fn));
   else
   {
-    auto cleanup = co_await submit(executor, resource, std::move(fn));
+    auto cleanup = co_await submit(executor, resource, composition_callable<raw_type>(fn));
     co_await std::move(cleanup);
   }
 

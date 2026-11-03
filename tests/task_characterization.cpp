@@ -99,6 +99,59 @@ void test_composition(modern::thread_pool& pool)
   require(preserved, "finally did not preserve the original exception");
 }
 
+void test_suspended_handler_lifetimes()
+{
+  for (int kind = 0; kind < 6; ++kind)
+  {
+    modern::sync::manual_reset_event started, release;
+    modern::thread_pool pool{1};
+    auto handler = [&, owned = std::make_unique<int>(42)](auto...) -> modern::task<int>
+    {
+      co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+      co_return *owned;
+    };
+    modern::task<int> result;
+    if (kind == 0)
+      result = modern::submit(pool, [] { return 1; }).then(std::move(handler));
+    else if (kind == 1)
+      result = modern::submit(pool, [] {}).then(std::move(handler));
+    else if (kind == 2)
+      result = modern::submit(pool, []() -> int { throw std::runtime_error("parent"); })
+        .catching(std::move(handler));
+    else if (kind == 3)
+      result = modern::submit(pool, [] { return 42; })
+        .finally([&, owned = std::make_unique<int>(42)]() -> modern::task<void>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          require(*owned == 42, "async finally lost its closure");
+        });
+    else if (kind == 4)
+      result = modern::submit(pool, [] { return std::make_unique<int>(42); })
+        .then([&](const std::unique_ptr<int>& value) -> modern::task<int>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          co_return *value;
+        });
+    else
+      result = modern::submit(pool, []() -> int { throw std::runtime_error("parent"); })
+        .catching([&](const std::exception_ptr& error) -> modern::task<int>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          bool caught = false;
+          try { std::rethrow_exception(error); }
+          catch (const std::runtime_error&) { caught = true; }
+          co_return caught ? 42 : 0;
+        });
+    // On one worker, the queued handler invocation has returned and its queue
+    // callable has been destroyed before this blocked child can start.
+    started.wait();
+    release.set();
+    require(result.get() == 42, "async composition lost its closure");
+    pool.shutdown();
+    pool.join();
+  }
+}
+
 void test_environment(modern::thread_pool& pool)
 {
   std::stop_source stop;
@@ -258,6 +311,7 @@ void test_move_only_and_races(modern::thread_pool& pool)
 
 int main()
 {
+  test_suspended_handler_lifetimes();
   modern::thread_pool pool{4};
   test_composition(pool);
   test_environment(pool);
