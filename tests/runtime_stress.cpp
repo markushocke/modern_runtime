@@ -108,10 +108,10 @@ void test_concurrent_producers(std::size_t iterations)
     require(count.load(std::memory_order_relaxed) == 1, "task did not execute exactly once");
 }
 
-void test_shutdown_drains()
+void test_shutdown_drains(std::size_t iterations)
 {
   checkpoint("shutdown", "start: occupying all four workers");
-  modern::thread_pool pool{4, modern::memory::get_default_resource(), 2048};
+  modern::thread_pool pool{4, modern::memory::get_default_resource(), iterations + 4};
   std::latch started{4};
   std::latch release{1};
   std::atomic<int> observed{0};
@@ -126,7 +126,7 @@ void test_shutdown_drains()
 
   started.wait();
   checkpoint("shutdown", "workers occupied; submitting 1000 queued tasks");
-  for (int i = 0; i < 1000; ++i)
+  for (std::size_t i = 0; i < iterations; ++i)
     pool.execute([&] { observed.fetch_add(1, std::memory_order_relaxed); });
 
   // The queue is provably nonempty when shutdown is called; this
@@ -138,7 +138,7 @@ void test_shutdown_drains()
   release.count_down();
   pool.join();
   checkpoint("shutdown", "pool joined");
-  require(observed.load() == 1004, "shutdown lost accepted tasks");
+  require(observed.load() == iterations + 4, "shutdown lost accepted tasks");
 }
 
 void test_cancellation(std::size_t iterations)
@@ -171,7 +171,7 @@ int main(int argc, char** argv)
     if (settings.scenario == "all" || settings.scenario == "producers")
       test_concurrent_producers(settings.iterations);
     if (settings.scenario == "all" || settings.scenario == "shutdown")
-      test_shutdown_drains();
+      test_shutdown_drains(settings.iterations);
     if (settings.scenario == "all" || settings.scenario == "cancellation")
       test_cancellation(settings.iterations);
     std::cout << "PASS: " << settings.scenario << '\n';

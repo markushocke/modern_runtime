@@ -8,6 +8,7 @@ module;
 
 #include <mutex>
 #include <stop_token>
+#include <thread>
 #include <utility>
 
 module modern.thread;
@@ -48,13 +49,23 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
     if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
       return;
 
-    auto task = pop_local_task(worker_index);
-    if (!task)
-      task = steal_task(worker_index);
-
-    // One published task corresponds to exactly one semaphore permit.
-    if (!task)
-      std::terminate();
+    move_only_function task;
+    while (!task)
+    {
+      task = pop_local_task(worker_index);
+      if (!task)
+        task = steal_task(worker_index);
+      if (!task)
+      {
+        // A scan is not a snapshot: another worker can take the task we
+        // observed a permit for, while a producer fills an already scanned
+        // queue. Retain our permit and retry, rather than acquiring twice.
+        const auto remaining = work_state_.load(std::memory_order_acquire);
+        if ((remaining & stop_bit) != 0 && (remaining & pending_mask) == 0)
+          return;
+        std::this_thread::yield();
+      }
+    }
 
     // The slot is released after dequeue, not after user-code execution.
     finish_pending_slot();
