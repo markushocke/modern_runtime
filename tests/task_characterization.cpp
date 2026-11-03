@@ -37,6 +37,48 @@ void require(bool condition, const char* message)
     throw std::runtime_error(message);
 }
 
+class allocation_resource final : public std::pmr::memory_resource
+{
+public:
+  std::atomic<std::size_t> allocations{0};
+private:
+  void* do_allocate(std::size_t bytes, std::size_t alignment) override
+  {
+    ++allocations;
+    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+  }
+  void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+  {
+    std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+  }
+  bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+  {
+    return this == &other;
+  }
+};
+
+struct counted_inline_executor
+{
+  std::pmr::memory_resource* allocator;
+  auto resource() const noexcept { return allocator; }
+  template<class F> void execute(F&& function) { function(); }
+};
+
+void test_small_submit_allocations()
+{
+  allocation_resource resource;
+  modern::scheduler executor{std::make_shared<counted_inline_executor>(&resource)};
+  auto submitted = modern::submit(executor, &resource, [] { return 21; });
+  require(resource.allocations == 1, "small submit allocated beyond its shared state");
+  auto result = std::move(submitted).then([](int value) { return value * 2; });
+  require(result.get() == 42, "inline continuation result changed");
+  // Three shared states plus the composition frame. Inline completion makes
+  // this independent of queue growth and await-registration races.
+#if MODERN_RUNTIME_INLINE_CALLABLE_BYTES >= 48
+  require(resource.allocations == 4, "small continuation allocated callable storage");
+#endif
+}
+
 modern::task<int> coroutine_pipeline(modern::thread_pool& pool)
 {
   auto value = co_await modern::submit(pool, [] { return 20; })
@@ -311,6 +353,7 @@ void test_move_only_and_races(modern::thread_pool& pool)
 
 int main()
 {
+  test_small_submit_allocations();
   test_suspended_handler_lifetimes();
   modern::thread_pool pool{4};
   test_composition(pool);

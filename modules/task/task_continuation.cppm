@@ -1250,9 +1250,11 @@ auto submit(scheduler executor, memory::memory_resource* resource, F&& f, Args&&
   auto arguments = std::make_tuple(std::remove_cvref_t<Args>(std::forward<Args>(args))...);
 
   environment.scheduler.execute(
-    [state, environment, callable = std::move(callable), arguments = std::move(arguments)]() mutable
+    [state, callable = std::move(callable), arguments = std::move(arguments)]() mutable
     {
-      task_environment_scope scope{environment};
+      // The shared state already owns this submission's environment snapshot.
+      // Keeping a second copy in the callable defeats small-callable storage.
+      task_environment_scope scope{*state->environment()};
       detail::fulfill<result_type>(state, [&]() mutable -> result_type
       {
         if constexpr (std::is_void_v<result_type>)
@@ -1297,12 +1299,12 @@ auto submit(scheduler executor, std::stop_token token, memory::memory_resource* 
   auto callable = callable_type(std::forward<F>(f));
   auto arguments = std::make_tuple(std::remove_cvref_t<Args>(std::forward<Args>(args))...);
   environment.scheduler.execute(
-    [state, started, callback, environment, token, callable = std::move(callable),
+    [state, started, callback, token, callable = std::move(callable),
      arguments = std::move(arguments)]() mutable
     {
       if (started->exchange(true, std::memory_order_acq_rel))
         return;
-      task_environment_scope scope{environment};
+      task_environment_scope scope{*state->environment()};
       detail::fulfill<result_type>(state, [&]() mutable -> result_type
       {
         if constexpr (traits::uses_stop_token)
