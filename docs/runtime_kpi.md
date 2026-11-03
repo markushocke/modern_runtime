@@ -131,3 +131,14 @@ improvement from this experiment.
 **Next:** stabilize CPU affinity / environmental conditions, then benchmark the
 shared wake mutex, wakeups and work-stealing under matched load. Fixing thread
 pool contention is higher priority than optimizing SBO size further.
+
+## Thread-pool audit (2026-11-03)
+
+See [the performance report](performance_report.md) for the semaphore protocol
+fixes, sanitizer findings, summarized comparisons with `88a81d3`, and measured
+optimization decisions. The KPI suite now registers 43 CTests, including
+100,000-task producer, concurrent shutdown, queue-limit, exception, lifecycle,
+allocation-failure and cancellation-race cases at 1/2/4/8/16 workers.
+`scripts/run_pool_matrix.py` compares arbitrary versioned executables with the
+unchanged benchmark; `scripts/summarize_pool_matrix.py` preserves failures and
+reports run medians, ranges and coefficient of variation.

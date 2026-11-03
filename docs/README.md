@@ -55,3 +55,9 @@ fiber scheduler. Their asynchronous task-producing operations return
 are created with `modern::make_stream()` and receive a move-only
 `modern::stream_source<T>`. See [stream_contract.md](stream_contract.md) for the
 backpressure, terminal-state, cancellation, and completion-observer rules.
+
+## Thread-pool validation and performance
+
+See [performance_report.md](performance_report.md) for correctness fixes,
+sanitizer results, reproducible 1–16-worker comparisons, measured allocation
+reductions and the remaining performance acceptance limits.
