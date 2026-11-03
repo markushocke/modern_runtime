@@ -49,7 +49,7 @@ private:
   }
 
   modern::memory::memory_resource* upstream_;
-  std::size_t allocations_ = 0;
+  std::atomic<std::size_t> allocations_{0};
 };
 
 class mock_io_service final
@@ -499,6 +499,10 @@ int main()
     int fiber_a_steps = 0;
     int fiber_b_steps = 0;
 
+    // Queue both fibers before allowing the single worker to run either.
+    modern::sync::manual_reset_event fibers_queued;
+    fiber_pool.execute([&] { fibers_queued.wait(); });
+
     fibers.spawn([&](modern::fiber_context& context)
     {
       fiber_order.push_back('A');
@@ -529,6 +533,7 @@ int main()
         fibers_done.set();
     });
 
+    fibers_queued.set();
     if (!fibers_done.wait_for(100ms) || fiber_order != "ABABA")
     {
       std::cerr << "fiber scheduler yield check failed\n";
@@ -752,12 +757,12 @@ int main()
     prioritized_scheduler.execute(modern::scheduler_priority::low, [&]
     {
       priority_order.push_back('L');
+      priority_done.set();
     });
 
     prioritized_scheduler.execute(modern::scheduler_priority::high, [&]
     {
       priority_order.push_back('H');
-      priority_done.set();
     });
 
     priority_release.set();

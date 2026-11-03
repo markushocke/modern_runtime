@@ -152,15 +152,18 @@ void test_deadline_merge_and_async_scope(modern::thread_pool& pool)
   modern::task_environment_scope environment_scope{environment};
   modern::task_scope scope{pool.get_scheduler(), pool.resource()};
   std::atomic<bool> propagated = false;
+  modern::sync::manual_reset_event resume_child;
   scope.spawn_async([&]() -> modern::task<void>
   {
     const auto token = co_await modern::this_task::stop_token();
     const auto child_deadline = co_await modern::this_task::deadline();
-    co_await modern::submit(pool, [] {});
+    co_await modern::submit(pool, [&] { resume_child.wait(); });
     propagated.store(
       token.stop_possible() && child_deadline == sooner,
       std::memory_order_release);
   });
+  // The temporary coroutine closure has left its full expression before resume.
+  resume_child.set();
   scope.join();
   require(propagated.load(std::memory_order_acquire),
     "async scope did not propagate its task environment");

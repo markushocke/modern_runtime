@@ -973,6 +973,15 @@ using status_task = task<std::expected<void, E>>;
 
 namespace detail
 {
+// Coroutine lambdas keep a pointer to their closure. Retain an owned closure
+// until the returned child finishes, including across suspension points.
+template<class F>
+task<void> retain_async_callable(task<void> child, std::shared_ptr<F> callable)
+{
+  co_await std::move(child);
+  (void)callable;
+}
+
 inline task<void> observe_scope_child(
   task<void> child,
   std::shared_ptr<task_scope_state> state)
@@ -1017,7 +1026,10 @@ void task_scope::spawn_async(F&& f, Args&&... args)
 {
   auto state = state_or_throw();
   task_environment_scope environment_scope{state->environment()};
-  spawn_async(std::invoke(std::forward<F>(f), std::forward<Args>(args)...));
+  auto callable = detail::allocate_shared_object<std::remove_cvref_t<F>>(
+    state->resource(), std::forward<F>(f));
+  auto child = std::invoke(*callable, std::forward<Args>(args)...);
+  spawn_async(detail::retain_async_callable(std::move(child), std::move(callable)));
 }
 } // namespace modern
 
