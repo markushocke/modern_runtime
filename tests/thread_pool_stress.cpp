@@ -7,6 +7,7 @@ import modern.runtime;
 #include <latch>
 #include <memory_resource>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>

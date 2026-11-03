@@ -17,7 +17,7 @@ namespace
 struct options
 {
   std::string scenario = "all";
-  std::size_t iterations = 10000;
+  std::size_t iterations = 100000;
 };
 
 options parse(int argc, char** argv)
@@ -125,14 +125,14 @@ void test_shutdown_drains(std::size_t iterations)
     });
 
   started.wait();
-  checkpoint("shutdown", "workers occupied; submitting 1000 queued tasks");
+  checkpoint("shutdown", "workers occupied; submitting queued tasks");
   for (std::size_t i = 0; i < iterations; ++i)
     pool.execute([&] { observed.fetch_add(1, std::memory_order_relaxed); });
 
   // The queue is provably nonempty when shutdown is called; this
   // distinguishes actual drain behavior from a pool that happened to
   // finish everything before shutdown.
-  checkpoint("shutdown", "1000 tasks queued; calling shutdown");
+  checkpoint("shutdown", "tasks queued; calling shutdown");
   pool.shutdown();
   checkpoint("shutdown", "releasing workers; calling join");
   release.count_down();
