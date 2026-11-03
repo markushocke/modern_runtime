@@ -139,6 +139,29 @@ void lifecycle(std::size_t workers, std::size_t n) {
   }
 }
 
+void cancellation_race(std::size_t workers, std::size_t n) {
+  counts seen(n);
+  modern::thread_pool pool{workers, nullptr, n};
+  std::vector<modern::task<int>> tasks;
+  tasks.reserve(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    std::stop_source stop;
+    tasks.push_back(modern::submit(pool, stop.get_token(), [&, i] {
+      ++seen[i];
+      return 42;
+    }));
+    stop.request_stop();
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    bool cancelled = false;
+    try { require(tasks[i].get() == 42, "incorrect cancellation race result"); }
+    catch (const modern::operation_cancelled&) { cancelled = true; }
+    require(seen[i].load() == (cancelled ? 0u : 1u), "cancellation/execution mismatch");
+  }
+  pool.shutdown();
+  pool.join();
+}
+
 class failing_resource : public std::pmr::memory_resource {
 public:
   std::atomic<bool> fail{false};
@@ -191,6 +214,7 @@ int main(int argc, char** argv) {
     else if (scenario == "queue_limit") queue_limit(workers, n);
     else if (scenario == "exceptions") exceptions(workers, n);
     else if (scenario == "lifecycle") lifecycle(workers, n);
+    else if (scenario == "cancellation_race") cancellation_race(workers, n);
     else if (scenario == "allocation_failure") allocation_failure(workers, n);
     else throw std::invalid_argument("unknown scenario");
     std::cout << "PASS\n";
