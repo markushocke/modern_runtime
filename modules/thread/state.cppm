@@ -5,7 +5,7 @@ module;
 
 #include <atomic>
 #include <limits>
-#include <semaphore>
+#include "../detail/task_semaphore.hpp"
 #include <cstddef>
 #include <memory>
 #include <memory_resource>
@@ -125,7 +125,7 @@ private:
   // High bit: shutdown. Remaining bits: accepted but not yet claimed tasks.
   std::atomic<std::size_t> work_state_{0};
   std::atomic<std::size_t> next_queue_{0};
-  std::counting_semaphore<> available_tasks_{0};
+  task_semaphore available_tasks_{0};
   std::pmr::vector<std::unique_ptr<worker_queue>> queues_;
   std::pmr::vector<std::jthread> workers_;
   std::pmr::vector<std::size_t> worker_affinity_;

@@ -2,7 +2,7 @@ module;
 
 #include <atomic>
 #include <exception>
-#include <semaphore>
+#include "../detail/task_semaphore.hpp"
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/intrusive_queue.hpp"
 

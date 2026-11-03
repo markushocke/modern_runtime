@@ -1,7 +1,7 @@
 module;
 
 #include <atomic>
-#include <semaphore>
+#include "../detail/task_semaphore.hpp"
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/shared_ptr.hpp"
 
@@ -55,6 +55,13 @@ void thread_pool_state::start(std::size_t thread_count)
 {
   if (!workers_.empty())
     throw std::logic_error("thread_pool was already started");
+
+  // Reserve room for shutdown permits as well as queued work.
+  const auto permit_limit = static_cast<std::size_t>(task_semaphore::max());
+  if (thread_count >= permit_limit)
+    throw std::length_error("too many thread_pool workers");
+  if (max_pending_tasks_ > permit_limit - thread_count)
+    max_pending_tasks_ = permit_limit - thread_count;
 
   queues_.reserve(thread_count);
   workers_.reserve(thread_count);
