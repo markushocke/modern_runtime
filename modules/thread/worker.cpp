@@ -40,6 +40,7 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
 {
   worker_context context{this, worker_index};
   (void)stop_token; // Shutdown and draining are controlled by work_state_.
+  std::size_t next_victim = worker_index + 1;
 
   while (true)
   {
@@ -54,7 +55,7 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
     {
       task = pop_local_task(worker_index);
       if (!task)
-        task = steal_task(worker_index);
+        task = steal_task(worker_index, next_victim);
       if (!task)
       {
         // A scan is not a snapshot: another worker can take the task we
