@@ -33,7 +33,7 @@ fi
 cmake --build "$COMPARE_BUILD_DIR" --parallel "$COMPARE_BUILD_JOBS" \
   --target "${targets[@]}"
 
-args=(--output "$COMPARE_OUTPUT" --runs "$COMPARE_RUNS" \
+args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.txt" --runs "$COMPARE_RUNS" \
       --operations "$COMPARE_OPERATIONS" --producers "$COMPARE_PRODUCERS" \
       --workers "${workers[@]}" \
       --binary "modern_runtime=$COMPARE_BUILD_DIR/compare_modern" \
