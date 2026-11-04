@@ -84,7 +84,8 @@ def main(folder):
         throughput = line["ops_per_second_median"]
         if line["paired_runs"] and line["failed_runs"] == 0:
             ratio = f"{line['paired_ratio_median']:.2f}x"
-            wins = f"{line['paired_wins']}/{line['paired_runs']}"
+            wins = ("reference" if line["framework"] == "modern_runtime" else
+                    f"{line['paired_wins']}/{line['paired_runs']}")
         else:
             ratio = "n/a"
             wins = "n/a"
