@@ -15,9 +15,9 @@ bash benchmarks/framework_comparison/run.sh
 ```
 
 The default run builds `modern_runtime`, **Taskflow 4.1.0** and
-**oneTBB 2022.3.0**. Taskflow and oneTBB are fetched from pinned revisions
-when needed; if a system oneTBB is found, it takes precedence (see the CMake
-cache for its path and version). The parent runtime is built using its
+**oneTBB 2022.3.0**. Both competitors are fetched from pinned Git revisions
+by default. Set `-DCOMPARE_USE_SYSTEM_TBB=ON` during manual CMake configuration
+only if you intentionally want to benchmark an installed oneTBB release. The parent runtime is built using its
 existing CMake files and dependencies. Network access is required for the
 initial external checkout unless sources are already cached.
 
@@ -55,7 +55,9 @@ COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 COMPARE_WORKERS="1 4" \
 
 Every adapter executes the **same C++ function body**: record enqueue-to-start
 delay, write a deterministic result into a disjoint vector slot, count down
-completion. The final verification checks all slots exactly once by value.
+completion. The final verification checks that each submitted index produced the expected
+value; dedicated stress tests, not this throughput benchmark, cover duplicate
+execution and other scheduler races.
 
 | Workload | Meaning |
 | --- | --- |
@@ -94,9 +96,8 @@ and inspect variance and p99.
 After committing runtime changes to `dev`:
 
 ```sh
-git fetch origin
 git switch bench/framework-comparison
-git merge --no-ff origin/dev
+bash benchmarks/framework_comparison/sync_dev.sh
 bash benchmarks/framework_comparison/run.sh
 ```
 
