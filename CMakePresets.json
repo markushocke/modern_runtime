@@ -40,6 +40,35 @@
         "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
+    },
+    {
+      "name": "kpi",
+      "inherits": "release",
+      "cacheVariables": {
+        "MODERN_RUNTIME_BUILD_KPI": "ON",
+        "MODERN_RUNTIME_INLINE_CALLABLE_BYTES": "48"
+      }
+    },
+    {
+      "name": "kpi-sanitize",
+      "inherits": "sanitize",
+      "cacheVariables": {
+        "MODERN_RUNTIME_BUILD_KPI": "ON"
+      }
+    },
+    {
+      "name": "kpi-sbo32",
+      "inherits": "kpi",
+      "cacheVariables": {
+        "MODERN_RUNTIME_INLINE_CALLABLE_BYTES": "32"
+      }
+    },
+    {
+      "name": "kpi-sbo48",
+      "inherits": "kpi",
+      "cacheVariables": {
+        "MODERN_RUNTIME_INLINE_CALLABLE_BYTES": "48"
+      }
     }
   ],
   "buildPresets": [
@@ -54,6 +83,22 @@
     {
       "name": "sanitize",
       "configurePreset": "sanitize"
+    },
+    {
+      "name": "kpi",
+      "configurePreset": "kpi"
+    },
+    {
+      "name": "kpi-sanitize",
+      "configurePreset": "kpi-sanitize"
+    },
+    {
+      "name": "kpi-sbo32",
+      "configurePreset": "kpi-sbo32"
+    },
+    {
+      "name": "kpi-sbo48",
+      "configurePreset": "kpi-sbo48"
     }
   ]
 }

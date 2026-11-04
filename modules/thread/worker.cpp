@@ -1,11 +1,14 @@
 module;
 
 #include <atomic>
+#include <exception>
+#include "../detail/task_semaphore.hpp"
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/intrusive_queue.hpp"
 
 #include <mutex>
 #include <stop_token>
+#include <thread>
 #include <utility>
 
 module modern.thread;
@@ -36,40 +39,36 @@ public:
 void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token stop_token)
 {
   worker_context context{this, worker_index};
+  (void)stop_token; // Shutdown and draining are controlled by work_state_.
 
   while (true)
   {
     available_tasks_.acquire();
 
-    if ((stopping_.load(std::memory_order_acquire) || stop_token.stop_requested()) &&
-        pending_tasks_.load(std::memory_order_acquire) == 0)
-    {
+    const auto state = work_state_.load(std::memory_order_acquire);
+    if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
       return;
-    }
 
-    auto task = pop_local_task(worker_index);
-
-    if (!task)
-      task = steal_task(worker_index);
-
-    if (!task)
+    move_only_function task;
+    while (!task)
     {
-      if (stopping_.load(std::memory_order_acquire) || stop_token.stop_requested())
-        return;
-
-      continue;
+      task = pop_local_task(worker_index);
+      if (!task)
+        task = steal_task(worker_index);
+      if (!task)
+      {
+        // A scan is not a snapshot: another worker can take the task we
+        // observed a permit for, while a producer fills an already scanned
+        // queue. Retain our permit and retry, rather than acquiring twice.
+        const auto remaining = work_state_.load(std::memory_order_acquire);
+        if ((remaining & stop_bit) != 0 && (remaining & pending_mask) == 0)
+          return;
+        std::this_thread::yield();
+      }
     }
 
-    pending_tasks_.fetch_sub(1, std::memory_order_release);
-
-    if (!task)
-    {
-      if (stopping_.load(std::memory_order_acquire) || stop_token.stop_requested())
-        return;
-
-      continue;
-    }
-
+    // The slot is released after dequeue, not after user-code execution.
+    finish_pending_slot();
     task();
   }
 }

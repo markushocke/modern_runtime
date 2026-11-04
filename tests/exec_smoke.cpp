@@ -2,6 +2,8 @@ import modern.exec;
 
 #include "../modules/detail/move_only_function_support.hpp"
 
+#include <array>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <memory_resource>
@@ -64,9 +66,35 @@ int main()
   counting_resource resource;
   bool direct_called = false;
 
-  modern::detail::move_only_function direct{&resource, [&]
+  // Small callables are intentionally stored inline, even when a PMR
+  // resource is supplied. Supplying an allocator does not require allocation.
+  const auto inline_before = resource.allocations();
+  modern::detail::move_only_function inline_call{&resource, [&]
   {
     direct_called = true;
+  }};
+
+  if (resource.allocations() != inline_before)
+  {
+    std::cerr << "small callable unexpectedly allocated\n";
+    return 1;
+  }
+
+  inline_call();
+  if (!direct_called)
+  {
+    std::cerr << "small inline callable failed\n";
+    return 1;
+  }
+
+  direct_called = false;
+
+  // A large capture forces the PMR-backed fallback, verifying that the
+  // explicitly supplied resource is honored when allocation is necessary.
+  modern::detail::move_only_function direct{&resource,
+    [&, payload = std::array<std::byte, 128>{}]
+  {
+    direct_called = payload.size() == 128;
   }};
 
   if (resource.allocations() == 0)
@@ -87,9 +115,11 @@ int main()
   int value = 0;
   auto before = resource.allocations();
 
-  scheduler.execute([&]
+  // Verify the scheduler forwards the executor's PMR resource for a
+  // callable that cannot be placed into the small inline buffer.
+  scheduler.execute([&, payload = std::array<std::byte, 128>{}]
   {
-    value = 42;
+    value = payload.size() == 128 ? 42 : -1;
   });
 
   if (value != 42)

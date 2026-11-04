@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.28)
 
 project(modern_runtime VERSION 0.1.0 LANGUAGES CXX)
 
+# GCC 13 cannot provide CMake C++23 named-module dependency discovery.
+# Report an actionable error before CMake reaches opaque try_compile failures.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+  message(FATAL_ERROR
+    "modern_runtime requires C++23 named-module dependency scanning; "
+    "GCC ${CMAKE_CXX_COMPILER_VERSION} is not supported by this build. "
+    "Configure a fresh build with Clang and clang-scan-deps, e.g. "
+    "cmake --preset kpi, or set -DCMAKE_CXX_COMPILER=/path/to/clang++. "
+    "CMake caches the compiler; use a fresh build directory when switching.")
+endif()
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -10,7 +21,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 set(MODERN_RUNTIME_PACKAGE_NAME modern_runtime)
 set(MODERN_RUNTIME_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_RUNTIME_PACKAGE_NAME}")
@@ -31,8 +41,21 @@ modern_runtime_resolve_trace_target(
 
 find_package(Threads REQUIRED)
 
+# Enable module scanning only after compiler/threads probes. CMake uses
+# this default for importers (tests, demos and KPI executables) as well.
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+
+set(MODERN_RUNTIME_INLINE_CALLABLE_BYTES "48" CACHE STRING
+  "Inline capacity for small scheduled callables (32 or 48 bytes)")
+set_property(CACHE MODERN_RUNTIME_INLINE_CALLABLE_BYTES PROPERTY STRINGS 32 48)
+if(NOT MODERN_RUNTIME_INLINE_CALLABLE_BYTES MATCHES "^(32|48)$")
+  message(FATAL_ERROR "MODERN_RUNTIME_INLINE_CALLABLE_BYTES must be 32 or 48")
+endif()
+
 add_library(modern_runtime)
 target_compile_features(modern_runtime PUBLIC cxx_std_23)
+target_compile_definitions(modern_runtime PUBLIC
+  MODERN_RUNTIME_INLINE_CALLABLE_BYTES=${MODERN_RUNTIME_INLINE_CALLABLE_BYTES})
 target_link_libraries(modern_runtime PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 target_include_directories(modern_runtime PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/modules
@@ -112,12 +135,18 @@ target_link_libraries(task_characterization PRIVATE modern_runtime)
 add_executable(stream_characterization tests/stream_characterization.cpp)
 target_link_libraries(stream_characterization PRIVATE modern_runtime)
 
+add_executable(move_only_function_test tests/move_only_function_test.cpp)
+set_target_properties(move_only_function_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+target_compile_definitions(move_only_function_test PRIVATE
+  MODERN_RUNTIME_INLINE_CALLABLE_BYTES=${MODERN_RUNTIME_INLINE_CALLABLE_BYTES})
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME exec_smoke COMMAND exec_smoke)
   add_test(NAME smoke_test COMMAND smoke_test)
   add_test(NAME task_characterization COMMAND task_characterization)
   add_test(NAME stream_characterization COMMAND stream_characterization)
+  add_test(NAME move_only_function_test COMMAND move_only_function_test)
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
@@ -179,3 +208,6 @@ install(
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/${MODERN_RUNTIME_PACKAGE_NAME}Targets.cmake"
   DESTINATION "${MODERN_RUNTIME_INSTALL_CMAKEDIR}"
 )
+
+# Optional, standalone performance and stress harness.
+include(cmake/RuntimeKpi.cmake)

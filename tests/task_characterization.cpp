@@ -37,6 +37,48 @@ void require(bool condition, const char* message)
     throw std::runtime_error(message);
 }
 
+class allocation_resource final : public std::pmr::memory_resource
+{
+public:
+  std::atomic<std::size_t> allocations{0};
+private:
+  void* do_allocate(std::size_t bytes, std::size_t alignment) override
+  {
+    ++allocations;
+    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+  }
+  void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+  {
+    std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+  }
+  bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+  {
+    return this == &other;
+  }
+};
+
+struct counted_inline_executor
+{
+  std::pmr::memory_resource* allocator;
+  auto resource() const noexcept { return allocator; }
+  template<class F> void execute(F&& function) { function(); }
+};
+
+void test_small_submit_allocations()
+{
+  allocation_resource resource;
+  modern::scheduler executor{std::make_shared<counted_inline_executor>(&resource)};
+  auto submitted = modern::submit(executor, &resource, [] { return 21; });
+  require(resource.allocations == 1, "small submit allocated beyond its shared state");
+  auto result = std::move(submitted).then([](int value) { return value * 2; });
+  require(result.get() == 42, "inline continuation result changed");
+  // Three shared states plus the composition frame. Inline completion makes
+  // this independent of queue growth and await-registration races.
+#if MODERN_RUNTIME_INLINE_CALLABLE_BYTES >= 48
+  require(resource.allocations == 4, "small continuation allocated callable storage");
+#endif
+}
+
 modern::task<int> coroutine_pipeline(modern::thread_pool& pool)
 {
   auto value = co_await modern::submit(pool, [] { return 20; })
@@ -99,6 +141,59 @@ void test_composition(modern::thread_pool& pool)
   require(preserved, "finally did not preserve the original exception");
 }
 
+void test_suspended_handler_lifetimes()
+{
+  for (int kind = 0; kind < 6; ++kind)
+  {
+    modern::sync::manual_reset_event started, release;
+    modern::thread_pool pool{1};
+    auto handler = [&, owned = std::make_unique<int>(42)](auto...) -> modern::task<int>
+    {
+      co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+      co_return *owned;
+    };
+    modern::task<int> result;
+    if (kind == 0)
+      result = modern::submit(pool, [] { return 1; }).then(std::move(handler));
+    else if (kind == 1)
+      result = modern::submit(pool, [] {}).then(std::move(handler));
+    else if (kind == 2)
+      result = modern::submit(pool, []() -> int { throw std::runtime_error("parent"); })
+        .catching(std::move(handler));
+    else if (kind == 3)
+      result = modern::submit(pool, [] { return 42; })
+        .finally([&, owned = std::make_unique<int>(42)]() -> modern::task<void>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          require(*owned == 42, "async finally lost its closure");
+        });
+    else if (kind == 4)
+      result = modern::submit(pool, [] { return std::make_unique<int>(42); })
+        .then([&](const std::unique_ptr<int>& value) -> modern::task<int>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          co_return *value;
+        });
+    else
+      result = modern::submit(pool, []() -> int { throw std::runtime_error("parent"); })
+        .catching([&](const std::exception_ptr& error) -> modern::task<int>
+        {
+          co_await modern::submit(pool, [&] { started.set(); release.wait(); });
+          bool caught = false;
+          try { std::rethrow_exception(error); }
+          catch (const std::runtime_error&) { caught = true; }
+          co_return caught ? 42 : 0;
+        });
+    // On one worker, the queued handler invocation has returned and its queue
+    // callable has been destroyed before this blocked child can start.
+    started.wait();
+    release.set();
+    require(result.get() == 42, "async composition lost its closure");
+    pool.shutdown();
+    pool.join();
+  }
+}
+
 void test_environment(modern::thread_pool& pool)
 {
   std::stop_source stop;
@@ -152,15 +247,18 @@ void test_deadline_merge_and_async_scope(modern::thread_pool& pool)
   modern::task_environment_scope environment_scope{environment};
   modern::task_scope scope{pool.get_scheduler(), pool.resource()};
   std::atomic<bool> propagated = false;
+  modern::sync::manual_reset_event resume_child;
   scope.spawn_async([&]() -> modern::task<void>
   {
     const auto token = co_await modern::this_task::stop_token();
     const auto child_deadline = co_await modern::this_task::deadline();
-    co_await modern::submit(pool, [] {});
+    co_await modern::submit(pool, [&] { resume_child.wait(); });
     propagated.store(
       token.stop_possible() && child_deadline == sooner,
       std::memory_order_release);
   });
+  // The temporary coroutine closure has left its full expression before resume.
+  resume_child.set();
   scope.join();
   require(propagated.load(std::memory_order_acquire),
     "async scope did not propagate its task environment");
@@ -255,6 +353,8 @@ void test_move_only_and_races(modern::thread_pool& pool)
 
 int main()
 {
+  test_small_submit_allocations();
+  test_suspended_handler_lifetimes();
   modern::thread_pool pool{4};
   test_composition(pool);
   test_environment(pool);

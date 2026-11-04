@@ -973,6 +973,15 @@ using status_task = task<std::expected<void, E>>;
 
 namespace detail
 {
+// Coroutine lambdas keep a pointer to their closure. Retain an owned closure
+// until the returned child finishes, including across suspension points.
+template<class F>
+task<void> retain_async_callable(task<void> child, std::shared_ptr<F> callable)
+{
+  co_await std::move(child);
+  (void)callable;
+}
+
 inline task<void> observe_scope_child(
   task<void> child,
   std::shared_ptr<task_scope_state> state)
@@ -1017,7 +1026,10 @@ void task_scope::spawn_async(F&& f, Args&&... args)
 {
   auto state = state_or_throw();
   task_environment_scope environment_scope{state->environment()};
-  spawn_async(std::invoke(std::forward<F>(f), std::forward<Args>(args)...));
+  auto callable = detail::allocate_shared_object<std::remove_cvref_t<F>>(
+    state->resource(), std::forward<F>(f));
+  auto child = std::invoke(*callable, std::forward<Args>(args)...);
+  spawn_async(detail::retain_async_callable(std::move(child), std::move(callable)));
 }
 } // namespace modern
 
@@ -1027,6 +1039,18 @@ template<class T>
 task<T> make_task(std::shared_ptr<void> state)
 {
   return task<T>{std::static_pointer_cast<shared_state<T>>(std::move(state))};
+}
+
+// A coroutine returned by a handler can retain the handler's this pointer.
+// Keep asynchronous handlers in the composition frame until flattening ends.
+// Synchronous handlers retain their existing move/lifetime behavior.
+template<class Result, class F>
+auto composition_callable(F& fn)
+{
+  if constexpr (is_task_v<Result>)
+    return std::ref(fn);
+  else
+    return std::move(fn);
 }
 
 template<class T, class F>
@@ -1041,12 +1065,12 @@ task<typename continuation_result<T, F>::type> compose_then(
     co_await std::move(parent);
     if constexpr (std::is_void_v<raw_type>)
     {
-      co_await submit(executor, resource, std::move(fn));
+      co_await submit(executor, resource, composition_callable<raw_type>(fn));
       co_return;
     }
     else
     {
-      auto raw = co_await submit(executor, resource, std::move(fn));
+      auto raw = co_await submit(executor, resource, composition_callable<raw_type>(fn));
       if constexpr (is_task_v<raw_type>)
       {
         if constexpr (std::is_void_v<result_type>)
@@ -1064,10 +1088,15 @@ task<typename continuation_result<T, F>::type> compose_then(
   else
   {
     auto value = co_await std::move(parent);
-    auto invoke = [fn = std::move(fn), value = std::move(value)]() mutable -> raw_type
+    auto invoke = [&]
     {
-      return std::invoke(fn, std::move(value));
-    };
+      if constexpr (is_task_v<raw_type>)
+        // A handler may borrow its input by reference across suspension too.
+        return [&fn, &value]() -> raw_type { return std::invoke(fn, std::move(value)); };
+      else
+        return [fn = std::move(fn), value = std::move(value)]() mutable -> raw_type
+        { return std::invoke(fn, std::move(value)); };
+    }();
 
     if constexpr (std::is_void_v<raw_type>)
     {
@@ -1127,10 +1156,14 @@ task<T> compose_catching(
   static_assert(std::same_as<task_unwrap_t<raw_type>, T>,
     "catching handler must return T, void, or task<T>");
 
-  auto invoke = [fn = std::move(fn), exception]() mutable -> raw_type
+  auto invoke = [&]
   {
-    return std::invoke(fn, exception);
-  };
+    if constexpr (is_task_v<raw_type>)
+      return [&fn, &exception]() -> raw_type { return std::invoke(fn, exception); };
+    else
+      return [fn = std::move(fn), exception]() mutable -> raw_type
+      { return std::invoke(fn, exception); };
+  }();
 
   if constexpr (std::is_void_v<raw_type>)
   {
@@ -1182,10 +1215,10 @@ task<T> compose_finally(
     "finally handler must return void or task<void>");
 
   if constexpr (std::is_void_v<raw_type>)
-    co_await submit(executor, resource, std::move(fn));
+    co_await submit(executor, resource, composition_callable<raw_type>(fn));
   else
   {
-    auto cleanup = co_await submit(executor, resource, std::move(fn));
+    auto cleanup = co_await submit(executor, resource, composition_callable<raw_type>(fn));
     co_await std::move(cleanup);
   }
 
@@ -1217,9 +1250,11 @@ auto submit(scheduler executor, memory::memory_resource* resource, F&& f, Args&&
   auto arguments = std::make_tuple(std::remove_cvref_t<Args>(std::forward<Args>(args))...);
 
   environment.scheduler.execute(
-    [state, environment, callable = std::move(callable), arguments = std::move(arguments)]() mutable
+    [state, callable = std::move(callable), arguments = std::move(arguments)]() mutable
     {
-      task_environment_scope scope{environment};
+      // The shared state already owns this submission's environment snapshot.
+      // Keeping a second copy in the callable defeats small-callable storage.
+      task_environment_scope scope{*state->environment()};
       detail::fulfill<result_type>(state, [&]() mutable -> result_type
       {
         if constexpr (std::is_void_v<result_type>)
@@ -1264,12 +1299,12 @@ auto submit(scheduler executor, std::stop_token token, memory::memory_resource* 
   auto callable = callable_type(std::forward<F>(f));
   auto arguments = std::make_tuple(std::remove_cvref_t<Args>(std::forward<Args>(args))...);
   environment.scheduler.execute(
-    [state, started, callback, environment, token, callable = std::move(callable),
+    [state, started, callback, token, callable = std::move(callable),
      arguments = std::move(arguments)]() mutable
     {
       if (started->exchange(true, std::memory_order_acq_rel))
         return;
-      task_environment_scope scope{environment};
+      task_environment_scope scope{*state->environment()};
       detail::fulfill<result_type>(state, [&]() mutable -> result_type
       {
         if constexpr (traits::uses_stop_token)
