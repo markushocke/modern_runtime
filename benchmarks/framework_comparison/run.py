@@ -45,6 +45,8 @@ def main():
     parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=list(WORKLOADS))
     parser.add_argument("--timeout", type=positive, default=120)
     parser.add_argument("--taskset", help="Optional Linux CPU list, e.g. 2-7")
+    parser.add_argument("--cmake-cache", type=Path,
+                        help="CMakeCache.txt used for this benchmark build")
     opts = parser.parse_args()
 
     binaries = []
@@ -62,7 +64,23 @@ def main():
         parser.error("--taskset requires the taskset executable")
 
     output = opts.output
+    if opts.cmake_cache and not opts.cmake_cache.is_file():
+        parser.error("missing --cmake-cache: " + str(opts.cmake_cache))
     output.mkdir(parents=True, exist_ok=False)
+    cache_bytes = opts.cmake_cache.read_bytes() if opts.cmake_cache else b""
+    cache_items = {}
+    if cache_bytes:
+        for line in cache_bytes.decode("utf-8", errors="replace").splitlines():
+            if line.startswith(("CMAKE_CXX_COMPILER:", "CMAKE_BUILD_TYPE:",
+                                "CMAKE_CXX_FLAGS_RELEASE:", "TBB_DIR:")):
+                key, _, value = line.partition("=")
+                cache_items[key] = value
+    try:
+        cpu_model = next(line.split(":", 1)[1].strip()
+                         for line in Path("/proc/cpuinfo").read_text().splitlines()
+                         if line.startswith("model name"))
+    except (OSError, StopIteration):
+        cpu_model = platform.processor()
     metadata = {
         "git_head": git("rev-parse", "HEAD"),
         "git_branch": git("branch", "--show-current"),
@@ -70,7 +88,9 @@ def main():
         "git_status": git("status", "--porcelain"),
         "platform": platform.platform(),
         "python": sys.version,
-        "cpu": platform.processor(),
+        "cpu": cpu_model,
+        "cmake_cache_sha256": hashlib.sha256(cache_bytes).hexdigest() if cache_bytes else None,
+        "cmake_configuration": cache_items,
         "affinity": sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
         "workers": opts.workers,
         "workloads": opts.workloads,
