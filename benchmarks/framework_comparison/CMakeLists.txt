@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
+find_package(Threads REQUIRED)
 
 option(COMPARE_WITH_TASKFLOW "Build the Taskflow adapter" ON)
 option(COMPARE_WITH_ONETBB "Build the oneTBB adapter" ON)
