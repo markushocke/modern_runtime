@@ -19,7 +19,8 @@ import time
 WORKLOADS = ("pool_dispatch", "pool_multi_producer", "pool_single_flight")
 METRICS = ("ops_per_second", "p50_ns", "p95_ns", "p99_ns", "p999_ns")
 FIELDS = ("framework", "run", "workload", "workers", "producers", "operations",
-          "returncode", "valid", "elapsed_wall_s", "error")
+          "returncode", "valid", "elapsed_wall_s", "error",
+          "cpu_freq_mhz_before", "cpu_freq_mhz_after")
 
 def positive(value):
     number = int(value)
@@ -33,6 +34,27 @@ def git(*args):
                                        stderr=subprocess.DEVNULL).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+
+def cpu_frequency_mhz():
+    # A best-effort pre/post-run snapshot, not a frequency trace.
+    values = []
+    for path in Path("/sys/devices/system/cpu/cpufreq").glob("policy*/scaling_cur_freq"):
+        try:
+            values.append(int(path.read_text().strip()))
+        except (OSError, ValueError):
+            pass
+    return round(sum(values) / len(values) / 1000.0, 1) if values else None
+
+
+def cpu_governors():
+    data = {}
+    for path in Path("/sys/devices/system/cpu/cpufreq").glob("policy*/scaling_governor"):
+        try:
+            data[path.parent.name] = path.read_text().strip()
+        except OSError:
+            pass
+    return data
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -92,6 +114,8 @@ def main():
         "cmake_cache_sha256": hashlib.sha256(cache_bytes).hexdigest() if cache_bytes else None,
         "cmake_configuration": cache_items,
         "affinity": sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+        "cpu_governors": cpu_governors(),
+        "cpu_frequency_mhz_initial": cpu_frequency_mhz(),
         "workers": opts.workers,
         "workloads": opts.workloads,
         "producers": opts.producers,
@@ -125,6 +149,7 @@ def main():
                                       workers=workers, producers=opts.producers,
                                       operations=opts.operations,
                                       returncode=0, valid=0, error="")
+                        record["cpu_freq_mhz_before"] = cpu_frequency_mhz()
                         began = time.monotonic()
                         stdout_path = output / (stem + ".csv")
                         stderr_path = output / (stem + ".stderr")
@@ -137,6 +162,7 @@ def main():
                                 record["returncode"] = 124
                                 record["error"] = "timeout"
                         record["elapsed_wall_s"] = round(time.monotonic() - began, 6)
+                        record["cpu_freq_mhz_after"] = cpu_frequency_mhz()
                         if record["returncode"] == 0:
                             try:
                                 with stdout_path.open(newline="") as data:
