@@ -79,11 +79,16 @@ A report is generated even when a run fails. Raw measurements are stored under
 `build/framework-comparison/` (ignored by the repository).
 
 The output contains:
-- `metadata.json` — source SHAs, binary SHA-256 hashes, affinity, run parameters
-- `runs.csv` — success/failure of **every** process
+- `metadata.json` — source SHAs, binary SHA-256 hashes, affinity, CPU model,
+  Linux frequency governors, build configuration, run parameters
+- `runs.csv` — success/failure of **every** process and best-effort CPU-frequency
+  snapshots just before/after each process
 - per-run `*.csv` and `*.stderr` — raw data and diagnostics
 - `summary.csv` — median, min, max and coefficient of variation
-- `report.md` — comparison against modern_runtime per workload and worker count
+- `report.md` — comparison against modern_runtime per workload and worker
+  count, paired within each measurement round; number of wins and high-variance
+  (CV >= 25%) warnings. Paired results still require a quiet host and enough
+  repetitions to draw any conclusions.
 
 Do not interpret five-minute desktop measurements as a reliable framework
 ranking. Use a quiet machine, stable frequency governor and explicit CPU
