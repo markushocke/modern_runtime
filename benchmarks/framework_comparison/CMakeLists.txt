@@ -10,6 +10,7 @@ option(COMPARE_WITH_TASKFLOW "Build the Taskflow adapter" ON)
 option(COMPARE_WITH_ONETBB "Build the oneTBB adapter" ON)
 option(COMPARE_WITH_STDEXEC "Build the stdexec sender/receiver adapter" OFF)
 option(COMPARE_FETCH_DEPS "Download pinned competitor sources" ON)
+option(COMPARE_USE_SYSTEM_TBB "Use installed oneTBB instead of the pinned revision" OFF)
 
 # Build the runtime unmodified as a dependency of these tests.
 set(MODERN_RUNTIME_BUILD_KPI OFF CACHE BOOL "" FORCE)
@@ -44,10 +45,11 @@ if(COMPARE_WITH_TASKFLOW)
 endif()
 
 if(COMPARE_WITH_ONETBB)
-  find_package(TBB CONFIG QUIET)
-  if(NOT TBB_FOUND)
+  if(COMPARE_USE_SYSTEM_TBB)
+    find_package(TBB CONFIG REQUIRED)
+  else()
     if(NOT COMPARE_FETCH_DEPS)
-      message(FATAL_ERROR "oneTBB unavailable and COMPARE_FETCH_DEPS=OFF")
+      message(FATAL_ERROR "Pinned oneTBB requires COMPARE_FETCH_DEPS=ON")
     endif()
     set(TBB_TEST OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(compare_onetbb
