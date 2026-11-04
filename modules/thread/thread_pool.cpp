@@ -164,20 +164,37 @@ move_only_function thread_pool_state::pop_local_task(std::size_t worker_index)
   return queue.pop_front();
 }
 
-move_only_function thread_pool_state::steal_task(std::size_t worker_index)
+move_only_function thread_pool_state::steal_task(
+  std::size_t worker_index, std::size_t& next_victim)
 {
-  const auto queue_count = queues_.size();
+  const auto count = queues_.size();
+  if (count < 2)
+    return {};
 
-  for (std::size_t offset = 1; offset < queue_count; ++offset)
+  // Start with a different victim on subsequent scans instead of repeatedly
+  // contending for the same queue. No shared cursor/atomic is necessary.
+  const auto first = next_victim % count;
+  for (std::size_t visited = 0; visited < count; ++visited)
   {
-    auto victim_index = (worker_index + offset) % queue_count;
+    const auto victim_index = (first + visited) % count;
+    if (victim_index == worker_index)
+      continue;
+
     auto& queue = *queues_[victim_index];
-    std::lock_guard lock(queue.mutex);
+    std::unique_lock lock(queue.mutex, std::try_to_lock);
+    if (!lock.owns_lock())
+      continue; // A busy queue should not stall this worker's entire scan.
 
     if (!queue.empty())
+    {
+      next_victim = (victim_index + 1) % count;
       return queue.pop_back();
+    }
   }
 
+  // The permit is retained by worker_loop(), which retries an empty scan.
+  // A producer may publish work while another worker holds its queue lock.
+  next_victim = (first + 1) % count;
   return {};
 }
 } // namespace modern::detail

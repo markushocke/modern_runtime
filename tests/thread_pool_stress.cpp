@@ -40,6 +40,25 @@ void producers(std::size_t workers, std::size_t n) {
   exactly_once(seen);
 }
 
+// A worker produces tasks into its own queue while other workers steal.
+// Exercises contention and verifies that retaining a permit across scans
+// never loses tasks or allows a premature shutdown.
+void local_fanout(std::size_t workers, std::size_t n) {
+  counts seen(n);
+  modern::thread_pool pool{workers, nullptr, n + workers + 128};
+  std::latch published{1};
+  pool.execute([&] {
+    for (std::size_t i = 0; i < n; ++i)
+      pool.execute(static_cast<modern::scheduler_priority>(i % 3),
+                   [&, i] { ++seen[i]; });
+    published.count_down();
+  });
+  published.wait();
+  pool.shutdown();
+  pool.join();
+  exactly_once(seen);
+}
+
 void shutdown_race(std::size_t workers, std::size_t n) {
   // Each round has guaranteed accepted work plus racing and rejected work.
   for (std::size_t base = 0; base < n; base += 1000) {
@@ -211,6 +230,7 @@ int main(int argc, char** argv) {
     if (!workers || !n) throw std::invalid_argument("positive counts required");
     std::cerr << scenario << ": workers=" << workers << " tasks=" << n << std::endl;
     if (scenario == "producers") producers(workers, n);
+    else if (scenario == "local_fanout") local_fanout(workers, n);
     else if (scenario == "shutdown_race") shutdown_race(workers, n);
     else if (scenario == "queue_limit") queue_limit(workers, n);
     else if (scenario == "exceptions") exceptions(workers, n);

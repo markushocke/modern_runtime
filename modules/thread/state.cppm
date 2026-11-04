@@ -117,7 +117,9 @@ private:
   void finish_pending_slot() noexcept;
 
   [[nodiscard]] move_only_function pop_local_task(std::size_t worker_index);
-  [[nodiscard]] move_only_function steal_task(std::size_t worker_index);
+  // Use a worker-local rotating victim cursor, avoiding global steal contention.
+  [[nodiscard]] move_only_function steal_task(std::size_t worker_index,
+                                              std::size_t& next_victim);
   void worker_loop(std::size_t worker_index, std::stop_token stop_token);
 
   std::pmr::memory_resource* resource_;

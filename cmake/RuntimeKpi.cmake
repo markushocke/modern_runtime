@@ -24,7 +24,7 @@ if(MODERN_RUNTIME_BUILD_KPI)
   target_link_libraries(thread_pool_stress PRIVATE modern_runtime)
   if(BUILD_TESTING)
     foreach(_workers IN ITEMS 1 2 4 8 16)
-      foreach(_scenario IN ITEMS producers shutdown_race queue_limit exceptions lifecycle allocation_failure cancellation_race)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit exceptions lifecycle allocation_failure cancellation_race)
         add_test(NAME pool_${_scenario}_${_workers}
           COMMAND thread_pool_stress ${_scenario} ${_workers} 100000)
         set_tests_properties(pool_${_scenario}_${_workers} PROPERTIES
