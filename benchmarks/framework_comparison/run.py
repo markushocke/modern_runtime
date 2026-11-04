@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Run independent scheduler benchmark processes and retain failures.
+
+One output directory is created per experiment. No measurement is silently
+retried; a nonzero exit, timeout or malformed result remains in runs.csv.
+"""
+import argparse
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import sys
+import time
+
+WORKLOADS = ("pool_dispatch", "pool_multi_producer", "pool_single_flight")
+METRICS = ("ops_per_second", "p50_ns", "p95_ns", "p99_ns", "p999_ns")
+FIELDS = ("framework", "run", "workload", "workers", "producers", "operations",
+          "returncode", "valid", "elapsed_wall_s", "error")
+
+def positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("expected positive integer")
+    return number
+
+def git(*args):
+    try:
+        return subprocess.check_output(["git", *args], text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", action="append", required=True, metavar="NAME=PATH")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--runs", type=positive, default=10)
+    parser.add_argument("--operations", type=positive, default=100000)
+    parser.add_argument("--producers", type=positive, default=4)
+    parser.add_argument("--workers", type=positive, nargs="+", default=[1, 2, 4, 8, 16])
+    parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=list(WORKLOADS))
+    parser.add_argument("--timeout", type=positive, default=120)
+    parser.add_argument("--taskset", help="Optional Linux CPU list, e.g. 2-7")
+    opts = parser.parse_args()
+
+    binaries = []
+    for item in opts.binary:
+        name, separator, path = item.partition("=")
+        if not separator or not name or not path:
+            parser.error("binary must be NAME=PATH")
+        path = Path(path).resolve()
+        if not path.is_file():
+            parser.error("missing executable: " + str(path))
+        binaries.append((name, path))
+    if len({name for name, _ in binaries}) != len(binaries):
+        parser.error("duplicate framework labels")
+    if opts.taskset and not shutil.which("taskset"):
+        parser.error("--taskset requires the taskset executable")
+
+    output = opts.output
+    output.mkdir(parents=True, exist_ok=False)
+    metadata = {
+        "git_head": git("rev-parse", "HEAD"),
+        "git_branch": git("branch", "--show-current"),
+        "git_dev_sha": git("rev-parse", "refs/heads/dev"),
+        "git_status": git("status", "--porcelain"),
+        "platform": platform.platform(),
+        "python": sys.version,
+        "cpu": platform.processor(),
+        "affinity": sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+        "workers": opts.workers,
+        "workloads": opts.workloads,
+        "producers": opts.producers,
+        "operations": opts.operations,
+        "runs": opts.runs,
+        "timeout_seconds": opts.timeout,
+        "taskset": opts.taskset,
+        "binaries": {name: {"path": str(path),
+                            "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                     for name, path in binaries}
+    }
+    (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    failures = 0
+    with (output / "runs.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(FIELDS) + list(METRICS))
+        writer.writeheader()
+        for run in range(1, opts.runs + 1):
+            # Rotate scheduler order to avoid systematically favoring the first.
+            rotated = binaries[(run - 1) % len(binaries):] + binaries[:(run - 1) % len(binaries)]
+            for workers in opts.workers:
+                for workload in opts.workloads:
+                    for name, binary in rotated:
+                        stem = f"{name}-t{workers}-r{run}-{workload}"
+                        command = [str(binary), "--workers", str(workers),
+                                   "--producers", str(opts.producers),
+                                   "--operations", str(opts.operations),
+                                   "--workload", workload]
+                        if opts.taskset:
+                            command = ["taskset", "-c", opts.taskset] + command
+                        record = dict(framework=name, run=run, workload=workload,
+                                      workers=workers, producers=opts.producers,
+                                      operations=opts.operations,
+                                      returncode=0, valid=0, error="")
+                        began = time.monotonic()
+                        stdout_path = output / (stem + ".csv")
+                        stderr_path = output / (stem + ".stderr")
+                        with stdout_path.open("w") as out, stderr_path.open("w") as err:
+                            try:
+                                finished = subprocess.run(command, stdout=out, stderr=err,
+                                                          timeout=opts.timeout, check=False)
+                                record["returncode"] = finished.returncode
+                            except subprocess.TimeoutExpired:
+                                record["returncode"] = 124
+                                record["error"] = "timeout"
+                        record["elapsed_wall_s"] = round(time.monotonic() - began, 6)
+                        if record["returncode"] == 0:
+                            try:
+                                with stdout_path.open(newline="") as data:
+                                    measurements = list(csv.DictReader(data))
+                                if len(measurements) != 1:
+                                    raise ValueError("expected one CSV measurement")
+                                measured = measurements[0]
+                                if not (measured["framework"] == name and
+                                        measured["workload"] == workload and
+                                        int(measured["workers"]) == workers and
+                                        int(measured["producers"]) == opts.producers and
+                                        int(measured["operations"]) == opts.operations and
+                                        measured["verified"] == "1"):
+                                    raise ValueError("result metadata / verification mismatch")
+                                for metric in METRICS:
+                                    value = float(measured[metric])
+                                    if not (value >= 0 and value < float("inf")):
+                                        raise ValueError("invalid metric: " + metric)
+                                    record[metric] = value
+                                record["valid"] = 1
+                            except (OSError, KeyError, ValueError) as exception:
+                                record["error"] = str(exception)
+                        else:
+                            record["error"] = record["error"] or "nonzero exit"
+                        if not record["valid"]:
+                            failures += 1
+                        writer.writerow(record)
+                        stream.flush()
+                        print(f"{stem}: {'OK' if record['valid'] else 'FAIL'}", flush=True)
+    print(f"Completed: {opts.runs * len(opts.workers) * len(opts.workloads) * len(binaries)} processes; "
+          f"failures: {failures}")
+    return 0 if failures == 0 else 2
+
+if __name__ == "__main__":
+    sys.exit(main())
