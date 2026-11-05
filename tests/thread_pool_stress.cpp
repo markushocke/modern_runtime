@@ -45,7 +45,12 @@ void producers(std::size_t workers, std::size_t n, modern::queue_backend backend
 // never loses tasks or allows a premature shutdown.
 void local_fanout(std::size_t workers, std::size_t n, modern::queue_backend backend) {
   counts seen(n);
-  modern::thread_pool pool{workers, nullptr, n + workers + 128, {}, backend};
+  modern::thread_pool pool{modern::thread_pool_options{
+    .workers = workers,
+    .resource = nullptr,
+    .max_pending_tasks = n + workers + 128,
+    .backend = backend
+  }};
   std::latch published{1};
   pool.execute([&] {
     for (std::size_t i = 0; i < n; ++i)

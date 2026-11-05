@@ -271,6 +271,15 @@ void thread_pool_state::join()
 
 namespace modern
 {
+thread_pool::thread_pool(thread_pool_options options)
+  : thread_pool(options.workers,
+                options.resource,
+                options.max_pending_tasks,
+                options.worker_affinity,
+                options.backend)
+{
+}
+
 thread_pool::thread_pool(
   std::size_t thread_count,
   memory::memory_resource* resource,
