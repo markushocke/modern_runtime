@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV)
 import modern.runtime;
 #endif
 
@@ -70,8 +70,10 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION)
-#if defined(COMPARE_MODERN_INJECTION)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV)
+#if defined(COMPARE_MODERN_CHASE_LEV)
+constexpr char framework[] = "modern_chase_lev";
+#elif defined(COMPARE_MODERN_INJECTION)
 constexpr char framework[] = "modern_injection";
 #else
 constexpr char framework[] = "modern_runtime";
@@ -79,7 +81,14 @@ constexpr char framework[] = "modern_runtime";
 class scheduler {
  public:
   scheduler(std::size_t workers, std::size_t ops)
-#if defined(COMPARE_MODERN_INJECTION)
+#if defined(COMPARE_MODERN_CHASE_LEV)
+    : pool_(modern::thread_pool_options{
+        .workers = workers,
+        .resource = nullptr,
+        .max_pending_tasks = ops + workers + 128,
+        .backend = modern::queue_backend::injection_chase_lev
+      }) {}
+#elif defined(COMPARE_MODERN_INJECTION)
     : pool_(workers, nullptr, ops + workers + 128, {},
             modern::queue_backend::injection_mutex_local) {}
 #else

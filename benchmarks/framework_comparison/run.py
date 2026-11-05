@@ -35,6 +35,17 @@ def git(*args):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
+
+def merged_dev_sha():
+    # A benchmark checkout need not have a local dev branch.
+    # The latest dev->benchmark sync is a merge; its second parent is the
+    # exact source dev revision in this benchmark snapshot.
+    parents = git("log", "--first-parent", "--merges", "-1", "--format=%P")
+    if parents and len(parents.split()) >= 2:
+        return parents.split()[1]
+    return git("rev-parse", "--verify", "refs/remotes/origin/dev") or git(
+        "rev-parse", "--verify", "refs/heads/dev")
+
 def cpu_frequency_mhz():
     # A best-effort pre/post-run snapshot, not a frequency trace.
     values = []
@@ -106,7 +117,7 @@ def main():
     metadata = {
         "git_head": git("rev-parse", "HEAD"),
         "git_branch": git("branch", "--show-current"),
-        "git_dev_sha": git("rev-parse", "refs/heads/dev"),
+        "git_dev_sha": merged_dev_sha(),
         "git_status": git("status", "--porcelain"),
         "platform": platform.platform(),
         "python": sys.version,
