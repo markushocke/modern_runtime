@@ -18,6 +18,14 @@ class thread_pool_state;
 
 export namespace modern
 {
+// Backend strategy is independent of the public scheduler/task interface.
+// Further backends, including Chase-Lev, can implement the internal protocol.
+enum class queue_backend
+{
+  direct_mutex,           // Original mutex-protected per-worker queues.
+  injection_mutex_local,  // Per-worker producer inbox + mutex-local queue.
+};
+
 class thread_pool
 {
 public:
@@ -25,7 +33,8 @@ public:
     std::size_t thread_count = std::thread::hardware_concurrency(),
     memory::memory_resource* resource = memory::get_default_resource(),
     std::size_t max_pending_tasks = 1024,
-    std::span<const std::size_t> worker_affinity = {});
+    std::span<const std::size_t> worker_affinity = {},
+    queue_backend backend = queue_backend::injection_mutex_local);
 
   thread_pool(const thread_pool&) = delete;
   thread_pool& operator=(const thread_pool&) = delete;

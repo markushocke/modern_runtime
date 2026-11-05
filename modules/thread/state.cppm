@@ -17,11 +17,28 @@ module;
 
 module modern.thread:state;
 
+import :api;
 import modern.exec;
 
 namespace modern::detail
 {
 class thread_pool_state;
+
+// Uniform ownership and dispatch boundary for interchangeable queue engines.
+class queue_strategy
+{
+public:
+  virtual ~queue_strategy() = default;
+  [[nodiscard]] virtual std::size_t size() const noexcept = 0;
+  virtual void push(std::size_t target, bool from_worker,
+                    move_only_function task, scheduler_priority priority) = 0;
+  [[nodiscard]] virtual move_only_function pop_local(std::size_t worker) = 0;
+  [[nodiscard]] virtual move_only_function pop_injected(std::size_t worker) = 0;
+  [[nodiscard]] virtual move_only_function steal_local(
+    std::size_t worker, std::size_t& next_victim) = 0;
+  [[nodiscard]] virtual move_only_function steal_injected(
+    std::size_t worker, std::size_t& next_victim) = 0;
+};
 
 inline thread_local thread_pool_state* current_thread_pool = nullptr;
 inline thread_local std::size_t current_worker_index = 0;
@@ -99,7 +116,8 @@ public:
   explicit thread_pool_state(
     std::pmr::memory_resource* resource = std::pmr::get_default_resource(),
     std::size_t max_pending_tasks = 1024,
-    std::span<const std::size_t> worker_affinity = {});
+    std::span<const std::size_t> worker_affinity = {},
+    queue_backend backend = queue_backend::injection_mutex_local);
   ~thread_pool_state();
 
   [[nodiscard]] std::pmr::memory_resource* resource() const noexcept;
@@ -116,19 +134,16 @@ private:
 
   void finish_pending_slot() noexcept;
 
-  [[nodiscard]] move_only_function pop_local_task(std::size_t worker_index);
-  // Use a worker-local rotating victim cursor, avoiding global steal contention.
-  [[nodiscard]] move_only_function steal_task(std::size_t worker_index,
-                                              std::size_t& next_victim);
   void worker_loop(std::size_t worker_index, std::stop_token stop_token);
 
   std::pmr::memory_resource* resource_;
   std::size_t max_pending_tasks_;
+  queue_backend backend_;
   // High bit: shutdown. Remaining bits: accepted but not yet claimed tasks.
   std::atomic<std::size_t> work_state_{0};
   std::atomic<std::size_t> next_queue_{0};
   task_semaphore available_tasks_{0};
-  std::pmr::vector<std::unique_ptr<worker_queue>> queues_;
+  std::unique_ptr<queue_strategy> queues_;
   std::pmr::vector<std::jthread> workers_;
   std::pmr::vector<std::size_t> worker_affinity_;
 };
