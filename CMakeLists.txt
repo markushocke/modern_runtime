@@ -141,6 +141,11 @@ set_target_properties(move_only_function_test PROPERTIES CXX_SCAN_FOR_MODULES OF
 target_compile_definitions(move_only_function_test PRIVATE
   MODERN_RUNTIME_INLINE_CALLABLE_BYTES=${MODERN_RUNTIME_INLINE_CALLABLE_BYTES})
 
+# Header-only queue algorithm validation, independent of C++23 modules.
+add_executable(lock_free_queue_primitives_test tests/lock_free_queue_primitives.cpp)
+set_target_properties(lock_free_queue_primitives_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+target_link_libraries(lock_free_queue_primitives_test PRIVATE Threads::Threads)
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME exec_smoke COMMAND exec_smoke)
@@ -148,6 +153,9 @@ if(BUILD_TESTING)
   add_test(NAME task_characterization COMMAND task_characterization)
   add_test(NAME stream_characterization COMMAND stream_characterization)
   add_test(NAME move_only_function_test COMMAND move_only_function_test)
+  add_test(NAME lock_free_queue_primitives COMMAND lock_free_queue_primitives_test)
+  set_tests_properties(lock_free_queue_primitives PROPERTIES
+    TIMEOUT 45 LABELS "stress;pool;lockfree")
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
