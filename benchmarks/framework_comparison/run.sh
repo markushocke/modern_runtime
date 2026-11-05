@@ -10,6 +10,7 @@ cd "$repo_root"
 : "${COMPARE_PRODUCERS:=4}"
 : "${COMPARE_WORKERS:=1 2 4 8 16}"
 : "${COMPARE_STDEXEC:=0}"
+: "${COMPARE_ONLY_RUNTIME:=0}"
 : "${COMPARE_OUTPUT:=build/framework-comparison/results-$(date -u +%Y%m%dT%H%M%SZ)}"
 : "${COMPARE_BUILD_DIR:=build/framework-comparison/cmake}"
 
@@ -19,14 +20,27 @@ if [[ -z "$compiler" ]]; then
   exit 1
 fi
 read -r -a workers <<< "$COMPARE_WORKERS"
+if [[ "$COMPARE_ONLY_RUNTIME" == "1" && "$COMPARE_STDEXEC" == "1" ]]; then
+  echo "ERROR: choose either COMPARE_ONLY_RUNTIME=1 or COMPARE_STDEXEC=1" >&2
+  exit 2
+fi
+compare_external=ON
+if [[ "$COMPARE_ONLY_RUNTIME" == "1" ]]; then
+  compare_external=OFF
+fi
 
 cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER="$compiler" \
+  -DCOMPARE_WITH_TASKFLOW="$compare_external" \
+  -DCOMPARE_WITH_ONETBB="$compare_external" \
   -DCOMPARE_WITH_STDEXEC="$COMPARE_STDEXEC" \
   -DCOMPARE_FETCH_DEPS=ON
 
-targets=(compare_modern compare_modern_injection compare_taskflow_binary compare_onetbb_binary)
+targets=(compare_modern compare_modern_injection)
+if [[ "$COMPARE_ONLY_RUNTIME" != "1" ]]; then
+  targets+=(compare_taskflow_binary compare_onetbb_binary)
+fi
 if [[ "$COMPARE_STDEXEC" == "1" ]]; then
   targets+=(compare_stdexec_binary)
 fi
@@ -37,10 +51,11 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --operations "$COMPARE_OPERATIONS" --producers "$COMPARE_PRODUCERS" \
       --workers "${workers[@]}" \
       --binary "modern_runtime=$COMPARE_BUILD_DIR/compare_modern" \
-      --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
-      --binary "taskflow=$COMPARE_BUILD_DIR/compare_taskflow_binary" \
-      --binary "onetbb=$COMPARE_BUILD_DIR/compare_onetbb_binary")
-
+      --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection")
+if [[ "$COMPARE_ONLY_RUNTIME" != "1" ]]; then
+  args+=(--binary "taskflow=$COMPARE_BUILD_DIR/compare_taskflow_binary"
+        --binary "onetbb=$COMPARE_BUILD_DIR/compare_onetbb_binary")
+fi
 if [[ "$COMPARE_STDEXEC" == "1" ]]; then
   args+=(--binary "stdexec=$COMPARE_BUILD_DIR/compare_stdexec_binary")
 fi

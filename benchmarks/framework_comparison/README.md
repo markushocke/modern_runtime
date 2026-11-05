@@ -34,6 +34,20 @@ constructs an operation state and cannot be equated with a low-level pool
 enqueue. The source revision is pinned, but the optional adapter still needs
 validation on the target Clang/CMake toolchain.
 
+## Fast runtime-only A/B test
+
+For a first smoke test or to focus exclusively on the two runtime backends:
+
+```sh
+COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
+  COMPARE_WORKERS="1 4" bash benchmarks/framework_comparison/run.sh
+```
+
+For a full paired A/B comparison, set `COMPARE_ONLY_RUNTIME=1` and
+`COMPARE_RUNS=20`. The default run still tests all four frameworks.
+The runtime-only mode also works without downloading/building competitor
+dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
+
 ## Configuration
 
 - `COMPARE_RUNS=10` — independent processes per configuration
