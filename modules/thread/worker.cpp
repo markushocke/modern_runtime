@@ -53,14 +53,18 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
     move_only_function task;
     while (!task)
     {
-      task = pop_local_task(worker_index);
+      task = queues_->pop_local(worker_index);
       if (!task)
-        task = steal_task(worker_index, next_victim);
+        task = queues_->pop_injected(worker_index);
+      if (!task)
+        task = queues_->steal_local(worker_index, next_victim);
+      if (!task)
+        task = queues_->steal_injected(worker_index, next_victim);
       if (!task)
       {
-        // A scan is not a snapshot: another worker can take the task we
-        // observed a permit for, while a producer fills an already scanned
-        // queue. Retain our permit and retry, rather than acquiring twice.
+        // A scan is not a snapshot. Another worker may have taken the
+        // published task, or a producer may still hold the inbox mutex.
+        // Keep the permit while retrying; never acquire twice.
         const auto remaining = work_state_.load(std::memory_order_acquire);
         if ((remaining & stop_bit) != 0 && (remaining & pending_mask) == 0)
           return;

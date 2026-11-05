@@ -26,9 +26,21 @@ if(MODERN_RUNTIME_BUILD_KPI)
     foreach(_workers IN ITEMS 1 2 4 8 16)
       foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit exceptions lifecycle allocation_failure cancellation_race)
         add_test(NAME pool_${_scenario}_${_workers}
-          COMMAND thread_pool_stress ${_scenario} ${_workers} 100000)
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 100000 injection)
         set_tests_properties(pool_${_scenario}_${_workers} PROPERTIES
           TIMEOUT 45 LABELS "stress;pool")
+      endforeach()
+    endforeach()
+    # Small identical correctness matrix on the original queue backend.
+    # The default path above tests injection; both use the same scenarios.
+    foreach(_workers IN ITEMS 1 2 4 8 16)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race
+                                  queue_limit exceptions lifecycle
+                                  allocation_failure cancellation_race)
+        add_test(NAME pool_direct_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 direct)
+        set_tests_properties(pool_direct_${_scenario}_${_workers} PROPERTIES
+          TIMEOUT 45 LABELS "stress;pool;backend")
       endforeach()
     endforeach()
   endif()
