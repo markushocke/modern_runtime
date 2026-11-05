@@ -177,6 +177,10 @@ void thread_pool_state::start(std::size_t thread_count)
     case queue_backend::injection_mutex_local:
       queues_ = std::make_unique<mutex_queue_strategy>(resource_, thread_count, true);
       break;
+    case queue_backend::injection_chase_lev:
+      queues_ = make_chase_lev_queue_strategy(
+        resource_, thread_count, max_pending_tasks_);
+      break;
     default:
       throw std::invalid_argument("unknown queue_backend");
   }
@@ -229,9 +233,13 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
   const auto queue_count = queues_->size();
   const bool from_worker = current_thread_pool == this &&
                            current_worker_index < queue_count;
+  // The Chase-Lev strategy has one global MPMC injection ring; selecting a
+  // particular inbox there only adds contention on next_queue_.
   const auto queue_index = from_worker
     ? current_worker_index
-    : next_queue_.fetch_add(1, std::memory_order_relaxed) % queue_count;
+    : backend_ == queue_backend::injection_chase_lev
+      ? 0
+      : next_queue_.fetch_add(1, std::memory_order_relaxed) % queue_count;
 
   try
   {

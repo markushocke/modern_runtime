@@ -111,6 +111,7 @@ target_sources(modern_runtime
       modules/runtime/sender_bridge.cppm
   PRIVATE
     modules/thread/thread_pool.cpp
+    modules/thread/queue_chase_lev.cpp
     modules/thread/worker.cpp
     modules/timer/scheduled_executor.cpp
     modules/timer/periodic.cpp
