@@ -117,7 +117,7 @@ public:
     std::pmr::memory_resource* resource = std::pmr::get_default_resource(),
     std::size_t max_pending_tasks = 1024,
     std::span<const std::size_t> worker_affinity = {},
-    queue_backend backend = queue_backend::injection_mutex_local);
+    queue_backend backend = queue_backend::direct_mutex);
   ~thread_pool_state();
 
   [[nodiscard]] std::pmr::memory_resource* resource() const noexcept;
