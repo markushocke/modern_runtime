@@ -26,9 +26,21 @@ enum class queue_backend
   injection_mutex_local,  // Per-worker producer inbox + mutex-local queue.
 };
 
+// Prefer named options for new users; positional constructor remains compatible.
+struct thread_pool_options
+{
+  std::size_t workers = std::thread::hardware_concurrency();
+  memory::memory_resource* resource = memory::get_default_resource();
+  std::size_t max_pending_tasks = 1024;
+  std::span<const std::size_t> worker_affinity = {};
+  queue_backend backend = queue_backend::direct_mutex;
+};
+
 class thread_pool
 {
 public:
+  explicit thread_pool(thread_pool_options options);
+
   explicit thread_pool(
     std::size_t thread_count = std::thread::hardware_concurrency(),
     memory::memory_resource* resource = memory::get_default_resource(),

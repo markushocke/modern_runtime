@@ -1,9 +1,10 @@
 # Thread-pool queue backends
 
 The scheduler-facing public API stays identical. For reproducible A/B
-measurement, the `thread_pool` constructor accepts an optional backend at
-the **end** of its existing argument list. Existing callers remain source
-compatible and continue to use the original queue implementation by default.
+measurement, new code can use named `thread_pool_options`, or an optional
+backend at the **end** of the existing constructor's argument list. Existing
+callers remain source compatible and continue to use the original queue
+implementation by default.
 
 ## API
 
@@ -13,17 +14,19 @@ import modern.runtime;
 // Original behavior; no caller changes required.
 modern::thread_pool baseline{8};
 
-// Separate producer ingress and worker-local queues, with PMR retained.
-modern::thread_pool injected{
-  8, modern::memory::get_default_resource(), 4096, {},
-  modern::queue_backend::injection_mutex_local
-};
+// Preferred: named options, no positional backend magic.
+modern::thread_pool injected{modern::thread_pool_options{
+  .workers = 8,
+  .resource = modern::memory::get_default_resource(),
+  .max_pending_tasks = 4096,
+  .backend = modern::queue_backend::injection_mutex_local
+}};
 
-// Make the original backend explicit when comparing.
-modern::thread_pool classic{
-  8, modern::memory::get_default_resource(), 4096, {},
-  modern::queue_backend::direct_mutex
-};
+// Make the original backend explicit for A/B comparisons.
+modern::thread_pool classic{modern::thread_pool_options{
+  .workers = 8,
+  .backend = modern::queue_backend::direct_mutex
+}};
 ```
 
 Both backends implement the same internal `modern::detail::queue_strategy`
