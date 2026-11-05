@@ -14,7 +14,9 @@ git switch bench/framework-comparison
 bash benchmarks/framework_comparison/run.sh
 ```
 
-The default run builds `modern_runtime`, **Taskflow 4.1.0** and
+The default run builds two `modern_runtime` queue variants (`modern_runtime`
+with `direct_mutex`, `modern_injection` with
+`injection_mutex_local`), **Taskflow 4.1.0** and
 **oneTBB 2022.3.0**. Both competitors are fetched from pinned Git revisions
 by default. Set `-DCOMPARE_USE_SYSTEM_TBB=ON` during manual CMake configuration
 only if you intentionally want to benchmark an installed oneTBB release. The parent runtime is built using its
@@ -77,6 +79,12 @@ Any rejected submission, process crash, timeout, missing task verification,
 or malformed result is counted as a **failure** rather than silently excluded.
 A report is generated even when a run fails. Raw measurements are stored under
 `build/framework-comparison/` (ignored by the repository).
+
+The `modern_injection` adapter is opt-in at the library API level; the
+benchmark constructs it explicitly. `modern_runtime` remains the reference
+backend, so same-round paired ratios show whether injection wins or loses.
+The new backend contains mutex-protected inboxes and local deques, **not**
+a Chase-Lev deque or a lock-free MPSC ring.
 
 The output contains:
 - `metadata.json` — source SHAs, binary SHA-256 hashes, affinity, CPU model,

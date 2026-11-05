@@ -26,7 +26,7 @@ cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_STDEXEC="$COMPARE_STDEXEC" \
   -DCOMPARE_FETCH_DEPS=ON
 
-targets=(compare_modern compare_taskflow_binary compare_onetbb_binary)
+targets=(compare_modern compare_modern_injection compare_taskflow_binary compare_onetbb_binary)
 if [[ "$COMPARE_STDEXEC" == "1" ]]; then
   targets+=(compare_stdexec_binary)
 fi
@@ -37,6 +37,7 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --operations "$COMPARE_OPERATIONS" --producers "$COMPARE_PRODUCERS" \
       --workers "${workers[@]}" \
       --binary "modern_runtime=$COMPARE_BUILD_DIR/compare_modern" \
+      --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
       --binary "taskflow=$COMPARE_BUILD_DIR/compare_taskflow_binary" \
       --binary "onetbb=$COMPARE_BUILD_DIR/compare_onetbb_binary")
 

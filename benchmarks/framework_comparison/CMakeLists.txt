@@ -25,9 +25,12 @@ function(compare_executable name selector)
 endfunction()
 
 compare_executable(compare_modern MODERN)
-# The benchmark TU imports the runtime's named C++23 module.
+compare_executable(compare_modern_injection MODERN_INJECTION)
+# Both benchmark translation units import the runtime's named C++23 module.
 set_property(TARGET compare_modern PROPERTY CXX_SCAN_FOR_MODULES ON)
+set_property(TARGET compare_modern_injection PROPERTY CXX_SCAN_FOR_MODULES ON)
 target_link_libraries(compare_modern PRIVATE modern_runtime)
+target_link_libraries(compare_modern_injection PRIVATE modern_runtime)
 
 if(COMPARE_WITH_TASKFLOW)
   if(NOT COMPARE_FETCH_DEPS)

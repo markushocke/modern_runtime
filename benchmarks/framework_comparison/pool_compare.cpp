@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION)
 import modern.runtime;
 #endif
 
@@ -70,12 +70,21 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION)
+#if defined(COMPARE_MODERN_INJECTION)
+constexpr char framework[] = "modern_injection";
+#else
 constexpr char framework[] = "modern_runtime";
+#endif
 class scheduler {
  public:
   scheduler(std::size_t workers, std::size_t ops)
+#if defined(COMPARE_MODERN_INJECTION)
+    : pool_(workers, nullptr, ops + workers + 128, {},
+            modern::queue_backend::injection_mutex_local) {}
+#else
     : pool_(workers, nullptr, ops + workers + 128) {}
+#endif
   template<class F> void submit(F&& f) { pool_.execute(std::forward<F>(f)); }
  private:
   modern::thread_pool pool_;
