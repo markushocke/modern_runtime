@@ -230,15 +230,19 @@ void allocation_failure(std::size_t workers, std::size_t n, modern::queue_backen
 int main(int argc, char** argv) {
   try {
     if (argc != 4 && argc != 5)
-      throw std::invalid_argument("usage: scenario workers tasks [injection|direct]");
+      throw std::invalid_argument("usage: scenario workers tasks [injection|direct|chase_lev]");
     const std::string scenario = argv[1];
     const auto workers = std::stoull(argv[2]), n = std::stoull(argv[3]);
     const std::string backend_name = argc == 5 ? argv[4] : "injection";
-    if (backend_name != "injection" && backend_name != "direct")
-      throw std::invalid_argument("backend must be injection or direct");
-    const auto backend = backend_name == "injection"
-      ? modern::queue_backend::injection_mutex_local
-      : modern::queue_backend::direct_mutex;
+    modern::queue_backend backend;
+    if (backend_name == "direct")
+      backend = modern::queue_backend::direct_mutex;
+    else if (backend_name == "injection")
+      backend = modern::queue_backend::injection_mutex_local;
+    else if (backend_name == "chase_lev")
+      backend = modern::queue_backend::injection_chase_lev;
+    else
+      throw std::invalid_argument("backend must be injection, direct or chase_lev");
     if (!workers || !n) throw std::invalid_argument("positive counts required");
     std::cerr << scenario << ": workers=" << workers << " tasks=" << n << std::endl;
     if (scenario == "producers") producers(workers, n, backend);

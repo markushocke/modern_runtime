@@ -31,6 +31,18 @@ if(MODERN_RUNTIME_BUILD_KPI)
           TIMEOUT 45 LABELS "stress;pool")
       endforeach()
     endforeach()
+    # Lock-free backend: the same race/priority/allocator scenarios as the
+    # mutex variants. 10k per case keeps default CTest latency reasonable.
+    foreach(_workers IN ITEMS 1 2 4 8 16)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race
+                                  queue_limit exceptions lifecycle
+                                  allocation_failure cancellation_race)
+        add_test(NAME pool_chase_lev_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev)
+        set_tests_properties(pool_chase_lev_${_scenario}_${_workers} PROPERTIES
+          TIMEOUT 45 LABELS "stress;pool;lockfree")
+      endforeach()
+    endforeach()
     # Small identical correctness matrix on the original queue backend.
     # The default path above tests injection; both use the same scenarios.
     foreach(_workers IN ITEMS 1 2 4 8 16)

@@ -24,6 +24,7 @@ enum class queue_backend
 {
   direct_mutex,           // Original mutex-protected per-worker queues.
   injection_mutex_local,  // Per-worker producer inbox + mutex-local queue.
+  injection_chase_lev,    // Bounded lock-free worker deques + MPMC ingress.
 };
 
 // Prefer named options for new users; positional constructor remains compatible.
