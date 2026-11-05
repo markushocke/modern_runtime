@@ -22,6 +22,13 @@ modern::thread_pool injected{modern::thread_pool_options{
   .backend = modern::queue_backend::injection_mutex_local
 }};
 
+// Opt-in bounded Chase-Lev + lock-free MPMC injection.
+modern::thread_pool lock_free_pool{modern::thread_pool_options{
+  .workers = 8,
+  .max_pending_tasks = 4096,
+  .backend = modern::queue_backend::injection_chase_lev
+}};
+
 // Make the original backend explicit for A/B comparisons.
 modern::thread_pool classic{modern::thread_pool_options{
   .workers = 8,
@@ -29,7 +36,7 @@ modern::thread_pool classic{modern::thread_pool_options{
 }};
 ```
 
-Both backends implement the same internal `modern::detail::queue_strategy`
+All three backends implement the same internal `modern::detail::queue_strategy`
 contract: `push`, `pop_local`, `pop_injected`, `steal_local`,
 `steal_injected`. Backend selection is made once at pool construction; the
 public `scheduler` and `submit` APIs do not change.
@@ -44,17 +51,34 @@ public `scheduler` and `submit` APIs do not change.
   uses its local deque. The two mutexes do not contend on external submission.
   A worker first drains local work, then its own inbox, then steals work from
   another local deque and finally assists a remote inbox if necessary.
-- The inboxes are *MPSC-style ingress* paths, not lock-free queues and
-  **not strictly single-consumer**: assisting workers may consume from another
-  inbox. This is essential for progress with a single pool-wide counting
-  semaphore whose permits are not directed to the inbox owners.
-- Work stealing uses rotating, nonblocking `try_lock` probes; an empty scan
-  retains its acquired permit and retries. All task publication is completed
-  before the matching semaphore release.
-- Each logical queue uses `std::pmr::deque` and the caller-provided
-  `memory_resource`. Neither backend removes PMR. Task callable ownership,
-  queue-capacity enforcement, shutdown/drain and exception rollback retain
-  the existing pool protocol.
+- The mutex-backed inboxes are *MPSC-style ingress* paths, not lock-free
+  queues and **not strictly single-consumer**: assisting workers may consume
+  from another inbox.
+- `injection_chase_lev`: each worker owns three bounded Chase-Lev deques
+  (high/normal/low priority). The owner pushes and pops the bottom without a
+  mutex. Other workers steal the top with a CAS. A separate bounded MPMC
+  injection ring, also with three priority lanes, accepts all external
+  submissions and owner-deque overflow. Any worker may consume from it.
+  MPMC (rather than strict MPSC) is intentional: pool-wide semaphore permits
+  do not identify an inbox owner. The shared ring is sized to hold at least
+  `max_pending_tasks` entries per priority, ensuring accepted tasks can be
+  published without requiring a mutex-backed overflow queue.
+- Chase-Lev local lanes have a fixed, power-of-two ring capacity of at most
+  1024 pointer slots (minimum two). Larger bursts spill into injection. The
+  buffers never resize, so concurrent thieves cannot access freed ring
+  storage. Tasks are stored in separately allocated PMR nodes: a winning CAS
+  gives exclusive ownership of the node, which is reclaimed only by that
+  winner. No hazard pointers or epoch reclamation are required for this fixed
+  ring design.
+- The lock-free paths use acquire/release and sequentially consistent atomic
+  operations. Queue operations don't acquire mutexes; **the entire submit
+  path is not guaranteed lock-free**: creating and destroying a PMR task node
+  can use a locking allocator, and the existing pool-wide admission control,
+  semaphore wakeup and task type erasure remain.
+- Original mutex-backed strategies still use rotating `try_lock` stealing
+  and PMR deques. All backends preserve priority lanes, the current
+  pool-level queue capacity, shutdown/drain and exception rollback semantics.
+  Priorities are local best-effort, not strict global ordering.
 
 ## Tradeoffs and forward compatibility
 
@@ -63,10 +87,18 @@ producer contention from worker-local access, but it does not remove mutexes
 from the hot path, and can add scanning/queueing overhead. It is **opt-in**
 until the controlled benchmark and sanitizer/stress matrices establish a win.
 
-A Chase-Lev owner/stealer deque can later replace the local queue backend under
-the same queue-strategy interface, but is **not implemented or advertised as
-available** in this change. It requires explicit design for resizing, memory
-reclamation, priority semantics, capacity, and clean shutdown.
+`injection_chase_lev` is implemented as a **bounded, opt-in experiment**.
+It deliberately avoids the substantially harder problem of dynamically
+resizing Chase-Lev storage and reclaiming slots while thieves are active.
+The initial design allocates one PMR task node per enqueue; measure allocation
+overhead before considering a pooled node allocator. PMR resources shared
+between producer and worker threads must themselves be safe for concurrent
+allocation and deallocation. Do not use a single unsynchronized pool resource
+from multiple threads.
+
+No backend is promoted until compiler, sanitizer, correctness and matched
+throughput/latency tests pass. This release does not claim that lock-free is
+necessarily faster than the existing mutex backend.
 
 Queue priorities are enforced within each local deque or inbox; this is not
 a strict global priority ordering across different worker queues.
@@ -79,10 +111,15 @@ cmake --build --preset kpi -j8
 ctest --test-dir build/kpi --output-on-failure -L pool
 ```
 
-The stress suite exercises the same eight scenarios against both backends,
+The stress suite exercises the same eight scenarios against all three backends,
 including work produced by a running worker, external multi-producer load,
 bounded queues, shutdown races, allocation failure and task cancellation.
 
-No performance claim is made without matched, repeated A/B results on the
+The standalone `lock_free_queue_primitives` CTest also checks 2-, 32- and
+256-slot rings under competing producers and consumers. Stress tests should
+include the local-fanout, shutdown and allocation-failure cases at each worker
+count and run with ASan/UBSan and TSan before any promotion.
+
+No performance claim is made without matched, repeated A/B/C results on the
 same hardware. Keep `dev` for source changes and merge it into
 `bench/framework-comparison` for experiments, never the reverse.
