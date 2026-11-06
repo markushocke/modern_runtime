@@ -2,6 +2,7 @@ import modern.runtime;
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <latch>
@@ -21,9 +22,9 @@ void exactly_once(const counts& seen) {
   for (const auto& n : seen) require(n.load() == 1, "lost or duplicated task");
 }
 
-void producers(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void producers(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   counts seen(n);
-  modern::thread_pool pool{workers, nullptr, n, {}, backend};
+  modern::thread_pool pool{workers, nullptr, n, {}, backend, wakeup};
   std::latch go{1};
   std::vector<std::jthread> writers;
   for (std::size_t p = 0; p < 8; ++p)
@@ -43,13 +44,14 @@ void producers(std::size_t workers, std::size_t n, modern::queue_backend backend
 // A worker produces tasks into its own queue while other workers steal.
 // Exercises contention and verifies that retaining a permit across scans
 // never loses tasks or allows a premature shutdown.
-void local_fanout(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void local_fanout(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   counts seen(n);
   modern::thread_pool pool{modern::thread_pool_options{
     .workers = workers,
     .resource = nullptr,
     .max_pending_tasks = n + workers + 128,
-    .backend = backend
+    .backend = backend,
+    .wakeup = wakeup
   }};
   std::latch published{1};
   pool.execute([&] {
@@ -64,13 +66,13 @@ void local_fanout(std::size_t workers, std::size_t n, modern::queue_backend back
   exactly_once(seen);
 }
 
-void shutdown_race(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void shutdown_race(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   // Each round has guaranteed accepted work plus racing and rejected work.
   for (std::size_t base = 0; base < n; base += 1000) {
     const auto count = std::min<std::size_t>(1000, n - base);
     counts seen(count * 2);
     std::vector<unsigned char> accepted(count * 2, 0);
-    modern::thread_pool pool{workers, nullptr, count * 2, {}, backend};
+    modern::thread_pool pool{workers, nullptr, count * 2, {}, backend, wakeup};
     const auto scheduler = pool.get_scheduler();
     for (std::size_t i = 0; i < count; ++i) {
       scheduler.execute([&, i] { ++seen[i]; });
@@ -103,9 +105,9 @@ void shutdown_race(std::size_t workers, std::size_t n, modern::queue_backend bac
   }
 }
 
-void queue_limit(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void queue_limit(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   counts seen(n);
-  modern::thread_pool pool{workers, nullptr, n, {}, backend};
+  modern::thread_pool pool{workers, nullptr, n, {}, backend, wakeup};
   std::latch started(static_cast<std::ptrdiff_t>(workers)), release{1};
   for (std::size_t i = 0; i < workers; ++i)
     pool.execute([&] { started.count_down(); release.wait(); });
@@ -123,9 +125,9 @@ void queue_limit(std::size_t workers, std::size_t n, modern::queue_backend backe
   exactly_once(seen);
 }
 
-void exceptions(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void exceptions(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   counts seen(n);
-  modern::thread_pool pool{workers, nullptr, n * 4, {}, backend};
+  modern::thread_pool pool{workers, nullptr, n * 4, {}, backend, wakeup};
   std::vector<modern::task<int>> tasks;
   tasks.reserve(n);
   for (std::size_t i = 0; i < n; ++i)
@@ -145,13 +147,13 @@ void exceptions(std::size_t workers, std::size_t n, modern::queue_backend backen
   exactly_once(seen);
 }
 
-void lifecycle(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void lifecycle(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   for (std::size_t base = 0; base < n; base += 1000) {
     const auto count = std::min<std::size_t>(1000, n - base);
     counts seen(count);
     modern::scheduler retained;
     {
-      modern::thread_pool pool{workers, nullptr, count, {}, backend};
+      modern::thread_pool pool{workers, nullptr, count, {}, backend, wakeup};
       retained = pool.get_scheduler();
       for (std::size_t i = 0; i < count; ++i)
         retained.execute([&, i] { ++seen[i]; });
@@ -164,9 +166,9 @@ void lifecycle(std::size_t workers, std::size_t n, modern::queue_backend backend
   }
 }
 
-void cancellation_race(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void cancellation_race(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   counts seen(n);
-  modern::thread_pool pool{workers, nullptr, n, {}, backend};
+  modern::thread_pool pool{workers, nullptr, n, {}, backend, wakeup};
   std::vector<modern::task<int>> tasks;
   tasks.reserve(n);
   for (std::size_t i = 0; i < n; ++i) {
@@ -203,10 +205,10 @@ private:
   }
 };
 
-void allocation_failure(std::size_t workers, std::size_t n, modern::queue_backend backend) {
+void allocation_failure(std::size_t workers, std::size_t n, modern::queue_backend backend, modern::worker_wakeup wakeup) {
   failing_resource resource;
   counts seen(n);
-  modern::thread_pool pool{workers, &resource, n + workers * 16, {}, backend};
+  modern::thread_pool pool{workers, &resource, n + workers * 16, {}, backend, wakeup};
   std::latch started(static_cast<std::ptrdiff_t>(workers)), release{1};
   for (std::size_t i = 0; i < workers; ++i)
     pool.execute([&] { started.count_down(); release.wait(); });
@@ -225,15 +227,54 @@ void allocation_failure(std::size_t workers, std::size_t n, modern::queue_backen
   require(failed, "queue allocation failure not injected");
   exactly_once(seen);
 }
+
+void idle_waves(std::size_t workers, std::size_t n,
+                modern::queue_backend backend, modern::worker_wakeup wakeup) {
+  counts seen(n);
+  modern::thread_pool pool{workers, nullptr, n + workers + 128, {}, backend, wakeup};
+  constexpr std::size_t waves = 32;
+  for (std::size_t wave = 0; wave < waves; ++wave) {
+    const auto begin = wave * n / waves;
+    const auto end = (wave + 1) * n / waves;
+    if (begin == end) continue;
+    std::latch done(static_cast<std::ptrdiff_t>(end - begin));
+    std::latch go{1};
+    std::vector<std::jthread> writers;
+    for (std::size_t p = 0; p < 4; ++p)
+      writers.emplace_back([&, p] {
+        go.wait();
+        for (auto i = begin + p; i < end; i += 4)
+          pool.execute([&, i] {
+            seen[i].fetch_add(1, std::memory_order_relaxed);
+            done.count_down();
+          });
+      });
+    go.count_down();
+    writers.clear();
+    done.wait();
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
+  }
+  pool.shutdown();
+  pool.join();
+  exactly_once(seen);
+}
 }
 
 int main(int argc, char** argv) {
   try {
-    if (argc != 4 && argc != 5)
-      throw std::invalid_argument("usage: scenario workers tasks [injection|direct|chase_lev]");
+    if (argc != 4 && argc != 5 && argc != 6)
+      throw std::invalid_argument("usage: scenario workers tasks [injection|direct|chase_lev] [semaphore|park]");
     const std::string scenario = argv[1];
     const auto workers = std::stoull(argv[2]), n = std::stoull(argv[3]);
-    const std::string backend_name = argc == 5 ? argv[4] : "injection";
+    const std::string backend_name = argc >= 5 ? argv[4] : "injection";
+    const std::string wakeup_name = argc == 6 ? argv[5] : "semaphore";
+    modern::worker_wakeup wakeup;
+    if (wakeup_name == "semaphore")
+      wakeup = modern::worker_wakeup::per_task_semaphore;
+    else if (wakeup_name == "park")
+      wakeup = modern::worker_wakeup::idle_parking;
+    else
+      throw std::invalid_argument("wakeup must be semaphore or park");
     modern::queue_backend backend;
     if (backend_name == "direct")
       backend = modern::queue_backend::direct_mutex;
@@ -245,14 +286,15 @@ int main(int argc, char** argv) {
       throw std::invalid_argument("backend must be injection, direct or chase_lev");
     if (!workers || !n) throw std::invalid_argument("positive counts required");
     std::cerr << scenario << ": workers=" << workers << " tasks=" << n << std::endl;
-    if (scenario == "producers") producers(workers, n, backend);
-    else if (scenario == "local_fanout") local_fanout(workers, n, backend);
-    else if (scenario == "shutdown_race") shutdown_race(workers, n, backend);
-    else if (scenario == "queue_limit") queue_limit(workers, n, backend);
-    else if (scenario == "exceptions") exceptions(workers, n, backend);
-    else if (scenario == "lifecycle") lifecycle(workers, n, backend);
-    else if (scenario == "cancellation_race") cancellation_race(workers, n, backend);
-    else if (scenario == "allocation_failure") allocation_failure(workers, n, backend);
+    if (scenario == "producers") producers(workers, n, backend, wakeup);
+    else if (scenario == "local_fanout") local_fanout(workers, n, backend, wakeup);
+    else if (scenario == "shutdown_race") shutdown_race(workers, n, backend, wakeup);
+    else if (scenario == "queue_limit") queue_limit(workers, n, backend, wakeup);
+    else if (scenario == "exceptions") exceptions(workers, n, backend, wakeup);
+    else if (scenario == "lifecycle") lifecycle(workers, n, backend, wakeup);
+    else if (scenario == "cancellation_race") cancellation_race(workers, n, backend, wakeup);
+    else if (scenario == "allocation_failure") allocation_failure(workers, n, backend, wakeup);
+    else if (scenario == "idle_waves") idle_waves(workers, n, backend, wakeup);
     else throw std::invalid_argument("unknown scenario");
     std::cout << "PASS\n";
   } catch (const std::exception& e) {

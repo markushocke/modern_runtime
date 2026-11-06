@@ -145,6 +145,9 @@ target_compile_definitions(move_only_function_test PRIVATE
 add_executable(lock_free_queue_primitives_test tests/lock_free_queue_primitives.cpp)
 set_target_properties(lock_free_queue_primitives_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 target_link_libraries(lock_free_queue_primitives_test PRIVATE Threads::Threads)
+add_executable(worker_parking_primitives_test tests/worker_parking_primitives.cpp)
+set_target_properties(worker_parking_primitives_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+target_link_libraries(worker_parking_primitives_test PRIVATE Threads::Threads)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -156,6 +159,9 @@ if(BUILD_TESTING)
   add_test(NAME lock_free_queue_primitives COMMAND lock_free_queue_primitives_test)
   set_tests_properties(lock_free_queue_primitives PROPERTIES
     TIMEOUT 45 LABELS "stress;pool;lockfree")
+  add_test(NAME worker_parking_primitives COMMAND worker_parking_primitives_test)
+  set_tests_properties(worker_parking_primitives PROPERTIES
+    TIMEOUT 45 LABELS "stress;pool;idlepark")
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
