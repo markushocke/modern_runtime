@@ -43,6 +43,32 @@ if(MODERN_RUNTIME_BUILD_KPI)
           TIMEOUT 45 LABELS "stress;pool;lockfree")
       endforeach()
     endforeach()
+    # Idle-only parking is an OPT-IN scheduling experiment, independent of
+    # the selected queue backend. Test all eight legacy stress scenarios plus
+    # repeated wake-after-idle waves, 1..16 workers. Distinct CTest names
+    # prevent silent changes to the existing semaphore-backed acceptance suite.
+    foreach(_workers IN ITEMS 1 2 4 8 16)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit
+                                  exceptions lifecycle allocation_failure
+                                  cancellation_race idle_waves)
+        add_test(NAME pool_park_chase_lev_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev park)
+        set_tests_properties(pool_park_chase_lev_${_scenario}_${_workers}
+          PROPERTIES TIMEOUT 45 LABELS "stress;pool;idlepark;lockfree")
+      endforeach()
+    endforeach()
+    # Prove wakeup/queue independence on both existing mutex backends.
+    foreach(_backend IN ITEMS direct injection)
+      foreach(_workers IN ITEMS 1 4 16)
+        foreach(_scenario IN ITEMS producers local_fanout shutdown_race
+                                    queue_limit idle_waves)
+          add_test(NAME pool_park_${_backend}_${_scenario}_${_workers}
+            COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 ${_backend} park)
+          set_tests_properties(pool_park_${_backend}_${_scenario}_${_workers}
+            PROPERTIES TIMEOUT 45 LABELS "stress;pool;idlepark")
+        endforeach()
+      endforeach()
+    endforeach()
     # Small identical correctness matrix on the original queue backend.
     # The default path above tests injection; both use the same scenarios.
     foreach(_workers IN ITEMS 1 2 4 8 16)
