@@ -2,7 +2,7 @@ module;
 
 #include <atomic>
 #include "../detail/task_semaphore.hpp"
-#include "../detail/worker_parking.hpp
+#include "../detail/worker_parking.hpp"
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/shared_ptr.hpp"
 
