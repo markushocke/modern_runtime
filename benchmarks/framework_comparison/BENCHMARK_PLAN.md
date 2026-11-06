@@ -27,6 +27,7 @@ stdexec is optional and is not strictly equivalent to raw enqueue.
 | P1 | pool_worker_fanout | Asset build or geometry tile spawns N smaller tasks on a worker | One root submits leaves; completion verifies all leaves | Added; needs on-host validation |
 | P1 | pool_mixed_compute | 15 short event/parse/transform tasks per 1 costly one | Identical deterministic CPU kernel and completion verification for every adapter | Added; needs on-host validation |
 | P2 | dependency_dag | Compilation/build DAG, dependent sub-jobs | Compare equal dependency semantics, never only equivalent node count | Not implemented |
+| P2 | bulk_parallel_for | Partition geometry/arrays/images into chunks | Equal element work and chunking; compare native Taskflow/oneTBB bulk APIs with equivalent modern tasks | Not implemented |
 | P1 | pool_staged_pipeline | Decode -> transform -> pack/result across three dependent tasks | Equal dynamic dependency structure; end-to-end latency; no backpressure guarantee | Added; needs on-host validation |
 | P2 | async_composition | task<T>, then/await, exceptions/cancellation | Capability benchmark; clearly distinguish API semantics when no analogue exists | Not implemented |
 | P2 | timer_and_io_handoff | Wakeup, cancellation, external I/O completion | Separate integration latency from raw pool throughput | Not implemented |
@@ -116,10 +117,10 @@ Validation for the lock-free backend:
    runs.csv, summary.csv, metadata.json AND profiler hotspots.md/stat/perf reports.
 3. Attribute the measured bottleneck before choosing PMR/node-pool, wakeup,
    queue or task API optimization.
-4. Implement a native dependency_dag comparison (Taskflow graph, oneTBB flow
-   graph and equivalent modern_runtime dependencies) and measure the effect
-   of true bounded backpressure; separate modern-only composition,
-   cancellation, timer and I/O results.
+4. Implement bulk_parallel_for and a native dependency_dag comparison
+   (Taskflow graph, oneTBB flow graph and equivalent modern_runtime
+   dependencies), and measure true bounded backpressure; separately assess
+   modern-only composition, cancellation, timer and I/O capabilities.
 
 Runtime code changes belong to dev. The benchmark harness and this plan
 belong to bench/framework-comparison; merge dev forward into benchmark.
