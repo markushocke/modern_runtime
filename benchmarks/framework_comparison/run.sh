@@ -9,6 +9,7 @@ cd "$repo_root"
 : "${COMPARE_OPERATIONS:=100000}"
 : "${COMPARE_PRODUCERS:=4}"
 : "${COMPARE_WORKERS:=1 2 4 8 16}"
+: "${COMPARE_WORKLOADS:=pool_worker_fanout pool_mixed_compute pool_dispatch pool_multi_producer pool_single_flight}"
 : "${COMPARE_STDEXEC:=0}"
 : "${COMPARE_ONLY_RUNTIME:=0}"
 : "${COMPARE_OUTPUT:=build/framework-comparison/results-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -20,6 +21,7 @@ if [[ -z "$compiler" ]]; then
   exit 1
 fi
 read -r -a workers <<< "$COMPARE_WORKERS"
+read -r -a workloads <<< "$COMPARE_WORKLOADS"
 if [[ "$COMPARE_ONLY_RUNTIME" == "1" && "$COMPARE_STDEXEC" == "1" ]]; then
   echo "ERROR: choose either COMPARE_ONLY_RUNTIME=1 or COMPARE_STDEXEC=1" >&2
   exit 2
@@ -49,7 +51,7 @@ cmake --build "$COMPARE_BUILD_DIR" --parallel "$COMPARE_BUILD_JOBS" \
 
 args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.txt" --runs "$COMPARE_RUNS" \
       --operations "$COMPARE_OPERATIONS" --producers "$COMPARE_PRODUCERS" \
-      --workers "${workers[@]}" \
+      --workers "${workers[@]}" --workloads "${workloads[@]}" \
       --binary "modern_runtime=$COMPARE_BUILD_DIR/compare_modern" \
       --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
       --binary "modern_chase_lev=$COMPARE_BUILD_DIR/compare_modern_chase_lev")
