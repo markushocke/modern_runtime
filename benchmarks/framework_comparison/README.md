@@ -1,5 +1,9 @@
 # Scheduler comparison benchmarks
 
+**Canonical scope and next steps:** [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
+The primary question is practical C++23 execution workloads versus Taskflow
+and oneTBB. Queue microbenchmarks are only an internal diagnostic layer.
+
 This folder is **benchmark infrastructure only**. The production runtime is not
 modified. New runtime development goes into `dev`; changes are then merged from
 `dev` into `bench/framework-comparison`, **never in the opposite direction**.
@@ -50,12 +54,43 @@ plus two competitor frameworks).
 The runtime-only mode also works without downloading/building competitor
 dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
 
+## Actual use cases and profiling
+
+The suite now includes two P1 use-case scenarios in addition to the three
+existing raw scheduling diagnostics:
+
+- `pool_worker_fanout`: a worker receives a root task and generates child
+  tasks for an asset/geometry/build-style fanout. Unlike external dispatch,
+  it exercises local deque push/pop and stealing.
+- `pool_mixed_compute`: identical tasks perform deterministic CPU work of
+  mixed sizes (15 short operations per one longer operation). Includes
+  scheduling plus realistic load imbalance, but does not claim to implement
+  a specific real-world parser or renderer.
+
+A full-framework test is the **default**; `COMPARE_ONLY_RUNTIME=1` intentionally
+excludes Taskflow/oneTBB and must not be described as a framework comparison.
+
+For a profile of all five backends with symbolized optimized code:
+
+```sh
+PROFILE_WORKERS=4 PROFILE_OPERATIONS=1000000 \
+  bash benchmarks/framework_comparison/profile.sh
+```
+
+Linux `perf` and sufficient performance-counter permissions are required.
+The separate profiler build saves `*.perf.data`, `*.perf.report.txt`,
+`*.stat.csv`, `metadata.txt` and the generated `hotspots.md`.
+This **does not replace** the uninstrumented benchmark results. It identifies
+sampled CPU hotspots; use the full call graph and counters to verify a
+hypothesis before optimizing.
+
 ## Configuration
 
 - `COMPARE_RUNS=10` — independent processes per configuration
 - `COMPARE_OPERATIONS=100000` — tasks per process
 - `COMPARE_PRODUCERS=4` — producers for multi-producer
 - `COMPARE_WORKERS="1 2 4 8 16"` — worker count matrix
+- `COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute pool_dispatch pool_multi_producer pool_single_flight"` — workload matrix
 - `COMPARE_TASKSET="2-7"` — optional Linux CPU affinity mask
 - `COMPARE_BUILD_JOBS=8` — parallel compiler jobs
 - `COMPARE_CXX=/path/to/clang++` — compiler override
@@ -82,6 +117,8 @@ execution and other scheduler races.
 | `pool_dispatch` | One producer submits all tasks, then waits for completion |
 | `pool_multi_producer` | Four producers begin together and submit to one pool |
 | `pool_single_flight` | One task in flight; submit, wait, repeat |
+| `pool_worker_fanout` | One worker creates a large batch of children; verify all completed |
+| `pool_mixed_compute` | One producer submits mixed-size deterministic CPU tasks |
 
 Each process initializes a fresh scheduler and completes 256 warm-up tasks
 before starting the clock. Throughput includes submission and completion.
