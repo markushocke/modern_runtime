@@ -34,6 +34,7 @@ enum class worker_wakeup
 {
   per_task_semaphore,
   idle_parking,
+  idle_parking_futex, // Linux-only alternative to std::atomic::wait.
 };
 
 // Prefer named options for new users; positional constructor remains compatible.

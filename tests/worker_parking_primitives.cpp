@@ -18,8 +18,10 @@ void require(bool condition, const char* message) {
 // performs the same register -> recheck -> sleep handshake as the pool.
 // The stress intentionally includes periods with no work and publications
 // during the registration window.
-void exercise(std::size_t workers, std::size_t producers, std::size_t count) {
-  modern::detail::worker_parking parking(workers, std::pmr::get_default_resource());
+void exercise(std::size_t workers, std::size_t producers, std::size_t count,
+              bool linux_futex) {
+  modern::detail::worker_parking parking(workers,
+    std::pmr::get_default_resource(), linux_futex);
   std::atomic<std::size_t> ready{0};
   std::atomic<std::size_t> done{0};
   std::atomic<bool> stop{false};
@@ -82,10 +84,13 @@ int main() {
     for (auto workers : {std::size_t{1}, std::size_t{2},
                          std::size_t{4}, std::size_t{16}}) {
       for (auto producers : {std::size_t{1}, std::size_t{4}}) {
-        exercise(workers, producers, 25000);
+        exercise(workers, producers, 25000, false);
+#if defined(__linux__)
+        exercise(workers, producers, 25000, true);
+#endif
       }
     }
-    std::cout << "PASS: idle worker parking under concurrent producer/wakeup races\n";
+    std::cout << "PASS: atomic and futex idle parking under concurrent producer/wakeup races\n";
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;

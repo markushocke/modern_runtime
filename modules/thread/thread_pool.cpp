@@ -187,8 +187,10 @@ void thread_pool_state::start(std::size_t thread_count)
     default:
       throw std::invalid_argument("unknown queue_backend");
   }
-  if (wakeup_ == worker_wakeup::idle_parking)
-    parking_ = std::make_unique<worker_parking>(thread_count, resource_);
+  if (wakeup_ == worker_wakeup::idle_parking ||
+      wakeup_ == worker_wakeup::idle_parking_futex)
+    parking_ = std::make_unique<worker_parking>(
+      thread_count, resource_, wakeup_ == worker_wakeup::idle_parking_futex);
   else if (wakeup_ != worker_wakeup::per_task_semaphore)
     throw std::invalid_argument("unknown worker_wakeup");
   workers_.reserve(thread_count);
@@ -215,7 +217,7 @@ void thread_pool_state::finish_pending_slot() noexcept
   const auto previous = work_state_.fetch_sub(1, std::memory_order_acq_rel);
   if ((previous & stop_bit) != 0 && (previous & pending_mask) == 1)
   {
-    if (wakeup_ == worker_wakeup::idle_parking)
+    if (parking_)
       parking_->notify_all();
     else
       available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
@@ -238,7 +240,7 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
 
     if (work_state_.compare_exchange_weak(
           state, state + 1,
-          wakeup_ == worker_wakeup::idle_parking
+          parking_
             ? std::memory_order_seq_cst : std::memory_order_acq_rel,
           std::memory_order_relaxed))
       break;
@@ -268,7 +270,7 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
 
   // Publish precedes notification. Idle parking reserves at most one
   // sleeping worker per notification; active workers drain queues directly.
-  if (wakeup_ == worker_wakeup::idle_parking)
+  if (parking_)
     parking_->notify_one();
   else
     available_tasks_.release();
@@ -278,11 +280,11 @@ void thread_pool_state::shutdown() noexcept
 {
   const auto previous = work_state_.fetch_or(
     stop_bit,
-    wakeup_ == worker_wakeup::idle_parking
+    parking_
       ? std::memory_order_seq_cst : std::memory_order_acq_rel);
   if ((previous & stop_bit) == 0 && (previous & pending_mask) == 0)
   {
-    if (wakeup_ == worker_wakeup::idle_parking)
+    if (parking_)
       parking_->notify_all();
     else
       available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));

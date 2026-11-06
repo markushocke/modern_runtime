@@ -57,6 +57,20 @@ if(MODERN_RUNTIME_BUILD_KPI)
           PROPERTIES TIMEOUT 45 LABELS "stress;pool;idlepark;lockfree")
       endforeach()
     endforeach()
+    # Linux futex comparison: the same queues and race matrix, but without
+    # the userspace spin phase of std::atomic::wait.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      foreach(_workers IN ITEMS 1 2 4 8 16)
+        foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit
+                                    exceptions lifecycle allocation_failure
+                                    cancellation_race idle_waves)
+          add_test(NAME pool_futex_chase_lev_${_scenario}_${_workers}
+            COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev futex)
+          set_tests_properties(pool_futex_chase_lev_${_scenario}_${_workers}
+            PROPERTIES TIMEOUT 45 LABELS "stress;pool;futex;lockfree")
+        endforeach()
+      endforeach()
+    endif()
     # Prove wakeup/queue independence on both existing mutex backends.
     foreach(_backend IN ITEMS direct injection)
       foreach(_workers IN ITEMS 1 4 16)
