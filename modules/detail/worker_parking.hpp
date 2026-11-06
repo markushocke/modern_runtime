@@ -91,7 +91,7 @@ public:
   void notify_all() noexcept {
     for (std::size_t i = 0; i < count_; ++i) {
       auto& entry = slots_[i];
-      if (entry.parked.exchange(false, std::memory_order_acq_rel))
+      if (entry.parked.exchange(false, std::memory_order_seq_cst))
         parked_count_.fetch_sub(1, std::memory_order_acq_rel);
       entry.epoch.fetch_add(1, std::memory_order_release);
       entry.epoch.notify_one();
