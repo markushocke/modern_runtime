@@ -129,6 +129,43 @@ def main(folder):
         "",
     ])
 
+    # Isolate the kernel sleep implementation from all queue/parking logic:
+    # direct Linux futex vs libstdc++ atomic::wait.
+    out.extend([
+        "## Direct futex vs atomic-wait idle parking (same Chase-Lev queues)",
+        "",
+        "Ratio above 1.0x: direct futex achieves higher throughput. Values below",
+        "1.0x for p99 mean direct futex has lower tail latency.",
+        "",
+        "| Workload | Workers | Pairs | Futex / atomic throughput | "
+        "Futex wins | Futex / atomic p99 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for workload, workers in configs:
+        speeds, tails = [], []
+        for repeat in sorted({row["run"] for row in rows
+                              if row["workload"] == workload
+                              and int(row["workers"]) == workers}):
+            futex = by_run.get((workload, workers, repeat, "modern_chase_lev_futex"))
+            atomic = by_run.get((workload, workers, repeat, "modern_chase_lev_park"))
+            if not futex or not atomic or any(
+                r["valid"] != "1" or r["returncode"] != "0"
+                for r in (futex, atomic)
+            ):
+                continue
+            speed = float(atomic["ops_per_second"])
+            tail = float(atomic["p99_ns"])
+            if speed > 0:
+                speeds.append(float(futex["ops_per_second"]) / speed)
+            if tail > 0:
+                tails.append(float(futex["p99_ns"]) / tail)
+        label = f"{statistics.median(speeds):.2f}x" if speeds else "n/a"
+        wins = f"{sum(x > 1 for x in speeds)}/{len(speeds)}" if speeds else "n/a"
+        p99 = f"{statistics.median(tails):.2f}x" if tails else "n/a"
+        out.append(f"| {workload} | {workers} | {len(speeds)} | "
+                   f"{label} | {wins} | {p99} |")
+    out.extend(["", "Ratios are from matching rounds; large CV limits conclusions.", ""])
+
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([
