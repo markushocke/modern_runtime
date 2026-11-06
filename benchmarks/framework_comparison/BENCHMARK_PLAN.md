@@ -13,8 +13,8 @@ tail latency and memory costs are competitive, and where the unified task/
 coroutine/cancellation/timer/I/O surface creates an integration advantage.
 
 Always include Taskflow 4.1.0 and oneTBB 2022.3.0 in the main comparison:
-the default run.sh builds three modern_runtime queue backends AND both
-competitors. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
+the default run.sh builds four modern_runtime scheduling variants AND both
+competitors. The fourth uses Chase-Lev queues with idle worker parking. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
 stdexec is optional and is not strictly equivalent to raw enqueue.
 
 ## Benchmark layers
@@ -66,15 +66,18 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
    on P1 fanout, staged pipeline and mixed CPU at 4/8 workers.
 2. Run profile.sh separately: it builds an optimized library with frame
    pointers and DWARF debug symbols, runs perf stat counters and samples
-   CPU stacks with perf record. Default: all five variants, P1 + multi-producer.
+   CPU stacks with perf record. Default: all six variants, P1 scenarios.
 3. Read hotspots.md (top self-overhead and rough categories), the full
    *.perf.report.txt, stat.csv and *.perf.data call graphs.
 4. Verify which call chains create the samples; check PMR malloc/free and
    cache behavior, pthread_mutex/futex/sem_wait, atomics, queue scanning,
    wakeup and user compute. Inspect perf annotate if a hot implementation
    path requires source/assembly-level confirmation.
-5. Optimize one measured hotspot on dev, retain the old backend as a
-   comparator, merge dev -> benchmark branch, rerun acceptance and full matrix.
+5. Compare the opt-in `modern_chase_lev_park` against the unchanged
+   Chase-Lev/semaphore baseline, Taskflow and oneTBB. Hypothesis: far fewer
+   voluntary context switches than ~1 per task; verify on 4/6/16 workers.
+6. Optimize the next measured hotspot on dev, retain older variants as
+   comparators, then rerun acceptance and the full matrix.
 
 CAUTION: a sampled profile cannot prove contention or waiting causality
 alone; off-CPU tracing may be required. Recorded samples are not directly
@@ -112,7 +115,9 @@ Validation for the lock-free backend:
 
 ## Next concrete steps
 
-1. On-host build/smoke and stress/sanitizer acceptance of P1 workloads.
+1. On-host C++23 module build, stress and sanitizer acceptance of idle parking,
+   including `worker_parking_primitives`, `pool_park_chase_lev_*`,
+   and repeated idle-wakeup cycles. Do not claim success until measured.
 2. Collect full competitor results and matching perf profiles. Upload report.md,
    runs.csv, summary.csv, metadata.json AND profiler hotspots.md/stat/perf reports.
 3. Attribute the measured bottleneck before choosing PMR/node-pool, wakeup,

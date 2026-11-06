@@ -44,8 +44,8 @@ cmake -S benchmarks/framework_comparison -B "$PROFILE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_ONETBB="$compare_external" \
   -DCOMPARE_WITH_STDEXEC=OFF
 
-names=(modern_runtime modern_injection modern_chase_lev)
-targets=(compare_modern compare_modern_injection compare_modern_chase_lev)
+names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park)
+targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park)
 if [[ "$PROFILE_INCLUDE_COMPETITORS" == 1 ]]; then
   names+=(taskflow onetbb)
   targets+=(compare_taskflow_binary compare_onetbb_binary)

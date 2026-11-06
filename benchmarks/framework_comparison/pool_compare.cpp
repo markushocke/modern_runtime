@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV || defined(COMPARE_MODERN_PARK)
 import modern.runtime;
 #endif
 
@@ -78,8 +78,10 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV)
-#if defined(COMPARE_MODERN_CHASE_LEV)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV || defined(COMPARE_MODERN_PARK)
+#if defined(COMPARE_MODERN_PARK)
+constexpr char framework[] = "modern_chase_lev_park";
+#elif defined(COMPARE_MODERN_CHASE_LEV)
 constexpr char framework[] = "modern_chase_lev";
 #elif defined(COMPARE_MODERN_INJECTION)
 constexpr char framework[] = "modern_injection";
@@ -89,7 +91,15 @@ constexpr char framework[] = "modern_runtime";
 class scheduler {
  public:
   scheduler(std::size_t workers, std::size_t ops)
-#if defined(COMPARE_MODERN_CHASE_LEV)
+#if defined(COMPARE_MODERN_PARK)
+    : pool_(modern::thread_pool_options{
+        .workers = workers,
+        .resource = nullptr,
+        .max_pending_tasks = ops + workers + 128,
+        .backend = modern::queue_backend::injection_chase_lev,
+        .wakeup = modern::worker_wakeup::idle_parking
+      }) {}
+#elif defined(COMPARE_MODERN_CHASE_LEV)
     : pool_(modern::thread_pool_options{
         .workers = workers,
         .resource = nullptr,

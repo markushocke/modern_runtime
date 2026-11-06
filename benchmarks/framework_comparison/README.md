@@ -19,17 +19,18 @@ git switch bench/framework-comparison
 bash benchmarks/framework_comparison/run.sh
 ```
 
-The default run builds three `modern_runtime` queue variants
+The default run builds four `modern_runtime` scheduling variants
 (`modern_runtime` with `direct_mutex`, `modern_injection` with
 `injection_mutex_local`, and `modern_chase_lev` with the opt-in bounded
-lock-free `injection_chase_lev`), **Taskflow 4.1.0** and
+lock-free `injection_chase_lev`, plus `modern_chase_lev_park` using the
+same Chase-Lev queues with idle-only worker parking), **Taskflow 4.1.0** and
 **oneTBB 2022.3.0**. Both competitors are fetched from pinned Git revisions
 by default. Set `-DCOMPARE_USE_SYSTEM_TBB=ON` during manual CMake configuration
 only if you intentionally want to benchmark an installed oneTBB release. The parent runtime is built using its
 existing CMake files and dependencies. Network access is required for the
 initial external checkout unless sources are already cached.
 
-Optional sixth adapter (after three runtime variants, Taskflow and oneTBB):
+Optional seventh adapter (after four runtime variants, Taskflow and oneTBB):
 
 ```sh
 COMPARE_STDEXEC=1 bash benchmarks/framework_comparison/run.sh
@@ -40,17 +41,17 @@ constructs an operation state and cannot be equated with a low-level pool
 enqueue. The source revision is pinned, but the optional adapter still needs
 validation on the target Clang/CMake toolchain.
 
-## Fast runtime-only A/B/C test
+## Fast runtime-only A/B/C/D test
 
-For a first smoke test or to focus exclusively on the three runtime backends:
+For a first smoke test or to focus exclusively on the four runtime variants:
 
 ```sh
 COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
   COMPARE_WORKERS="1 4" bash benchmarks/framework_comparison/run.sh
 ```
 
-For a full paired A/B/C comparison, set `COMPARE_ONLY_RUNTIME=1` and
-`COMPARE_RUNS=20`. The default run tests five backends (three runtime variants
+For a full paired A/B/C/D comparison, set `COMPARE_ONLY_RUNTIME=1` and
+`COMPARE_RUNS=20`. The default run tests six candidates (four runtime variants
 plus two competitor frameworks).
 The runtime-only mode also works without downloading/building competitor
 dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
@@ -75,7 +76,7 @@ existing raw scheduling diagnostics:
 A full-framework test is the **default**; `COMPARE_ONLY_RUNTIME=1` intentionally
 excludes Taskflow/oneTBB and must not be described as a framework comparison.
 
-For a profile of all five backends with symbolized optimized code:
+For a profile of all six candidates with symbolized optimized code:
 
 ```sh
 PROFILE_WORKERS=4 PROFILE_OPERATIONS=1000000 \
@@ -153,10 +154,17 @@ or malformed result is counted as a **failure** rather than silently excluded.
 A report is generated even when a run fails. Raw measurements are stored under
 `build/framework-comparison/` (ignored by the repository).
 
-The `modern_injection` and `modern_chase_lev` adapters are opt-in at the
+The `modern_injection`, `modern_chase_lev` and `modern_chase_lev_park`
+adapters are opt-in at the
 library API level; the benchmark constructs both explicitly.
 `modern_runtime` remains the direct-mutex reference, so same-round paired
 ratios show whether injection or Chase-Lev wins or loses.
+
+`modern_chase_lev_park` uses the **same queues** as `modern_chase_lev`,
+but changes only the wakeup protocol to idle-only, per-worker atomic parking.
+This isolates the effect of per-task semaphore permits. The original
+`modern_chase_lev` remains the A/B baseline. The new variant must pass
+sanitizer and stress acceptance before default promotion.
 
 `modern_chase_lev` uses fixed-capacity, PMR-backed Chase-Lev worker deques
 and a bounded lock-free MPMC injection ring. Queue operations are mutex-free,
