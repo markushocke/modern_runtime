@@ -52,8 +52,11 @@ public:
     const auto observed = entry.epoch.load(std::memory_order_acquire);
     // Count first, then publish the parked flag. A notifier that sees a
     // transient count without a flag can safely skip: the worker rechecks.
-    parked_count_.fetch_add(1, std::memory_order_acq_rel);
-    entry.parked.store(true, std::memory_order_release);
+    // Seq-cst pairing with the publisher's acceptance CAS and idle
+    // worker's post-registration state load prevents a missed notification:
+    // either the worker sees pending work, or the publisher sees this waiter.
+    parked_count_.fetch_add(1, std::memory_order_seq_cst);
+    entry.parked.store(true, std::memory_order_seq_cst);
     return observed;
   }
 
@@ -70,13 +73,13 @@ public:
   }
 
   void notify_one() noexcept {
-    if (parked_count_.load(std::memory_order_acquire) == 0)
+    if (parked_count_.load(std::memory_order_seq_cst) == 0)
       return;
 
     const auto first = next_wake_.fetch_add(1, std::memory_order_relaxed) % count_;
     for (std::size_t step = 0; step < count_; ++step) {
       auto& entry = slots_[(first + step) % count_];
-      if (!entry.parked.exchange(false, std::memory_order_acq_rel))
+      if (!entry.parked.exchange(false, std::memory_order_seq_cst))
         continue;
       parked_count_.fetch_sub(1, std::memory_order_acq_rel);
       entry.epoch.fetch_add(1, std::memory_order_release);

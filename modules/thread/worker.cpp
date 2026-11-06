@@ -135,7 +135,10 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
       continue;
     }
 
-    state = work_state_.load(std::memory_order_acquire);
+    // Seq-cst must pair with the publisher's acceptance CAS. Otherwise a
+    // worker could miss both pending work and the publisher's parked-count
+    // check, and enter atomic::wait despite a queued task.
+    state = work_state_.load(std::memory_order_seq_cst);
     if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
     {
       parking_->cancel(worker_index);

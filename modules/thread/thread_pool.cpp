@@ -236,7 +236,9 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
       throw std::runtime_error("thread_pool queue is full");
 
     if (work_state_.compare_exchange_weak(
-          state, state + 1, std::memory_order_acq_rel,
+          state, state + 1,
+          wakeup_ == worker_wakeup::idle_parking
+            ? std::memory_order_seq_cst : std::memory_order_acq_rel,
           std::memory_order_relaxed))
       break;
   }
@@ -273,7 +275,10 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
 
 void thread_pool_state::shutdown() noexcept
 {
-  const auto previous = work_state_.fetch_or(stop_bit, std::memory_order_acq_rel);
+  const auto previous = work_state_.fetch_or(
+    stop_bit,
+    wakeup_ == worker_wakeup::idle_parking
+      ? std::memory_order_seq_cst : std::memory_order_acq_rel);
   if ((previous & stop_bit) == 0 && (previous & pending_mask) == 0)
   {
     if (wakeup_ == worker_wakeup::idle_parking)
