@@ -56,7 +56,7 @@ dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
 
 ## Actual use cases and profiling
 
-The suite now includes two P1 use-case scenarios in addition to the three
+The suite now includes three P1 use-case scenarios in addition to the three
 existing raw scheduling diagnostics:
 
 - `pool_worker_fanout`: a worker receives a root task and generates child
@@ -66,6 +66,10 @@ existing raw scheduling diagnostics:
   mixed sizes (15 short operations per one longer operation). Includes
   scheduling plus realistic load imbalance, but does not claim to implement
   a specific real-world parser or renderer.
+- `pool_staged_pipeline`: three dependent processing tasks per data item
+  (decode -> transform -> pack). Throughput counts **completed items/s**,
+  not individual tasks/s. p99 measures end-to-end submission-to-completion.
+  The stages are representative in-memory transforms rather than a real codec.
 
 A full-framework test is the **default**; `COMPARE_ONLY_RUNTIME=1` intentionally
 excludes Taskflow/oneTBB and must not be described as a framework comparison.
@@ -90,7 +94,7 @@ hypothesis before optimizing.
 - `COMPARE_OPERATIONS=100000` — tasks per process
 - `COMPARE_PRODUCERS=4` — producers for multi-producer
 - `COMPARE_WORKERS="1 2 4 8 16"` — worker count matrix
-- `COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute pool_dispatch pool_multi_producer pool_single_flight"` — workload matrix
+- `COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute pool_staged_pipeline pool_dispatch pool_multi_producer pool_single_flight"` — workload matrix
 - `COMPARE_TASKSET="2-7"` — optional Linux CPU affinity mask
 - `COMPARE_BUILD_JOBS=8` — parallel compiler jobs
 - `COMPARE_CXX=/path/to/clang++` — compiler override
@@ -119,11 +123,14 @@ execution and other scheduler races.
 | `pool_single_flight` | One task in flight; submit, wait, repeat |
 | `pool_worker_fanout` | One worker creates a large batch of children; verify all completed |
 | `pool_mixed_compute` | One producer submits mixed-size deterministic CPU tasks |
+| `pool_staged_pipeline` | Decode, transform, pack as three dependent tasks per item |
 
 Each process initializes a fresh scheduler and completes 256 warm-up tasks
 before starting the clock. Throughput includes submission and completion.
 Single-flight captures hand-off/round-trip effects. Saturated enqueue-to-start
 latency includes **queue backlog** and should not be called wakeup latency.
+For `pool_staged_pipeline`, latency instead measures the full three-stage
+submission-to-completion transaction, not just queueing.
 All frameworks use the same timestamp, storage, task body and completion
 protocol; their public enqueue interfaces do not necessarily offer identical
 scheduling guarantees.

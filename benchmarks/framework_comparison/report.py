@@ -69,7 +69,8 @@ def main(folder):
         f"Runs: {len(rows)}; invalid/failed: {total_fails}.",
         "",
         "Numbers use **per-process medians**, with independent process min–max. "
-        "The p99 is enqueue-to-start (including backlog), not isolated wakeup latency.",
+        "p99 is enqueue-to-start (including backlog) for dispatch/fanout/mixed work; "
+        "for pool_staged_pipeline it is end-to-end from submission to stage-three completion.",
         "",
         "Paired ratios compare each framework with modern_runtime in the same "
         "measurement round. A value above 1.0 means the competitor was faster. "
@@ -92,7 +93,7 @@ def main(folder):
         "Paired vs direct | Wins/pairs | p99 µs | Run CV % |",
         "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
-    practical = ("pool_worker_fanout", "pool_mixed_compute")
+    practical = ("pool_worker_fanout", "pool_mixed_compute", "pool_staged_pipeline")
     for workload in practical:
         for workers in (4, 8):
             for row in summary:
@@ -121,7 +122,9 @@ def main(folder):
     out.extend([
         "",
         "**Note:** fanout measures locally spawned tasks; mixed_compute includes "
-        "the identical deterministic CPU body for all frameworks. Interpret paired "
+        "the identical deterministic CPU body for all frameworks. The staged pipeline "
+        "uses three dependent task submissions per completed item and reports "
+        "logical items/s rather than scheduled tasks/s. Interpret paired "
         "ratios only when run CV and platform conditions are acceptable.",
         "",
         "## Full matrix (including low-level diagnostics)",

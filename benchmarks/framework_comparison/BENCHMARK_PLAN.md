@@ -27,7 +27,7 @@ stdexec is optional and is not strictly equivalent to raw enqueue.
 | P1 | pool_worker_fanout | Asset build or geometry tile spawns N smaller tasks on a worker | One root submits leaves; completion verifies all leaves | Added; needs on-host validation |
 | P1 | pool_mixed_compute | 15 short event/parse/transform tasks per 1 costly one | Identical deterministic CPU kernel and completion verification for every adapter | Added; needs on-host validation |
 | P2 | dependency_dag | Compilation/build DAG, dependent sub-jobs | Compare equal dependency semantics, never only equivalent node count | Not implemented |
-| P2 | staged_pipeline | Decode -> transform -> pack/result, with backpressure | Equal stage/completion semantics, end-to-end elapsed and tail | Not implemented |
+| P1 | pool_staged_pipeline | Decode -> transform -> pack/result across three dependent tasks | Equal dynamic dependency structure; end-to-end latency; no backpressure guarantee | Added; needs on-host validation |
 | P2 | async_composition | task<T>, then/await, exceptions/cancellation | Capability benchmark; clearly distinguish API semantics when no analogue exists | Not implemented |
 | P2 | timer_and_io_handoff | Wakeup, cancellation, external I/O completion | Separate integration latency from raw pool throughput | Not implemented |
 
@@ -35,6 +35,11 @@ The P1 CPU mix is deterministic and dependency-free. It is a *model workload*,
 not a claim that a particular JSON parser, renderer, or compiler was measured.
 The fanout benchmark actually exercises worker-local enqueue/steal: unlike the
 original three scenarios it can expose Chase-Lev benefits.
+The pipeline intentionally uses three sequential, dynamically submitted tasks
+per item on each framework. It is a practical dependency pattern, not a
+benchmark of framework-native DAG builders, graph optimization, or bounded
+backpressure. Report its throughput in completed items/s and its p99 as
+end-to-end completion latency; other workloads use enqueue-to-start latency.
 
 ## Primary scorecard and comparison rules
 
@@ -57,7 +62,7 @@ original three scenarios it can expose Chase-Lev benefits.
 ## Profiling protocol (diagnosis, not comparative score)
 
 1. Identify an adverse case with the uninstrumented *full* comparison. Focus
-   on P1 fanout at 4/8 workers and mixed CPU at 4/8 workers.
+   on P1 fanout, staged pipeline and mixed CPU at 4/8 workers.
 2. Run profile.sh separately: it builds an optimized library with frame
    pointers and DWARF debug symbols, runs perf stat counters and samples
    CPU stacks with perf record. Default: all five variants, P1 + multi-producer.
@@ -111,8 +116,10 @@ Validation for the lock-free backend:
    runs.csv, summary.csv, metadata.json AND profiler hotspots.md/stat/perf reports.
 3. Attribute the measured bottleneck before choosing PMR/node-pool, wakeup,
    queue or task API optimization.
-4. Implement dependency_dag and staged_pipeline with truly comparable
-   semantics; separate modern-only composition/cancellation/timer/I/O results.
+4. Implement a native dependency_dag comparison (Taskflow graph, oneTBB flow
+   graph and equivalent modern_runtime dependencies) and measure the effect
+   of true bounded backpressure; separate modern-only composition,
+   cancellation, timer and I/O results.
 
 Runtime code changes belong to dev. The benchmark harness and this plan
 belong to bench/framework-comparison; merge dev forward into benchmark.

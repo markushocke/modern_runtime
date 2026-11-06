@@ -17,7 +17,8 @@ import sys
 import time
 
 WORKLOADS = ("pool_dispatch", "pool_multi_producer", "pool_single_flight",
-             "pool_worker_fanout", "pool_mixed_compute")
+             "pool_worker_fanout", "pool_mixed_compute",
+             "pool_staged_pipeline")
 METRICS = ("ops_per_second", "p50_ns", "p95_ns", "p99_ns", "p999_ns")
 FIELDS = ("framework", "run", "workload", "workers", "producers", "operations",
           "returncode", "valid", "elapsed_wall_s", "error",
