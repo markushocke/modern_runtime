@@ -134,12 +134,14 @@ thread_pool_state::thread_pool_state(
   std::pmr::memory_resource* resource,
   std::size_t max_pending_tasks,
   std::span<const std::size_t> worker_affinity,
-  queue_backend backend)
+  queue_backend backend,
+  worker_wakeup wakeup)
   : resource_(resource ? resource : std::pmr::get_default_resource()),
     max_pending_tasks_(max_pending_tasks == 0
       ? 1
       : (max_pending_tasks > pending_mask ? pending_mask : max_pending_tasks)),
     backend_(backend),
+    wakeup_(wakeup),
     workers_(resource_),
     worker_affinity_(worker_affinity.begin(), worker_affinity.end(), resource_)
 {
@@ -184,6 +186,10 @@ void thread_pool_state::start(std::size_t thread_count)
     default:
       throw std::invalid_argument("unknown queue_backend");
   }
+  if (wakeup_ == worker_wakeup::idle_parking)
+    parking_ = std::make_unique<worker_parking>(thread_count, resource_);
+  else if (wakeup_ != worker_wakeup::per_task_semaphore)
+    throw std::invalid_argument("unknown worker_wakeup");
   workers_.reserve(thread_count);
 
   for (std::size_t i = 0; i < thread_count; ++i)
@@ -207,7 +213,12 @@ void thread_pool_state::finish_pending_slot() noexcept
 {
   const auto previous = work_state_.fetch_sub(1, std::memory_order_acq_rel);
   if ((previous & stop_bit) != 0 && (previous & pending_mask) == 1)
-    available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+  {
+    if (wakeup_ == worker_wakeup::idle_parking)
+      parking_->notify_all();
+    else
+      available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+  }
 }
 
 void thread_pool_state::execute(move_only_function task, scheduler_priority priority)
@@ -252,15 +263,24 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
     throw;
   }
 
-  // Only published tasks have semaphore permits.
-  available_tasks_.release();
+  // Publish precedes notification. Idle parking reserves at most one
+  // sleeping worker per notification; active workers drain queues directly.
+  if (wakeup_ == worker_wakeup::idle_parking)
+    parking_->notify_one();
+  else
+    available_tasks_.release();
 }
 
 void thread_pool_state::shutdown() noexcept
 {
   const auto previous = work_state_.fetch_or(stop_bit, std::memory_order_acq_rel);
   if ((previous & stop_bit) == 0 && (previous & pending_mask) == 0)
-    available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+  {
+    if (wakeup_ == worker_wakeup::idle_parking)
+      parking_->notify_all();
+    else
+      available_tasks_.release(static_cast<std::ptrdiff_t>(workers_.size()));
+  }
 
   for (auto& worker : workers_)
     worker.request_stop();
@@ -284,7 +304,8 @@ thread_pool::thread_pool(thread_pool_options options)
                 options.resource,
                 options.max_pending_tasks,
                 options.worker_affinity,
-                options.backend)
+                options.backend,
+                options.wakeup)
 {
 }
 
@@ -293,13 +314,15 @@ thread_pool::thread_pool(
   memory::memory_resource* resource,
   std::size_t max_pending_tasks,
   std::span<const std::size_t> worker_affinity,
-  queue_backend backend)
+  queue_backend backend,
+  worker_wakeup wakeup)
   : state_(detail::allocate_shared_object<detail::thread_pool_state>(
       resource ? resource : memory::get_default_resource(),
       resource,
       max_pending_tasks,
       worker_affinity,
-      backend))
+      backend,
+      wakeup))
 {
   if (thread_count == 0)
     thread_count = 1;

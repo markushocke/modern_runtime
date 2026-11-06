@@ -27,6 +27,15 @@ enum class queue_backend
   injection_chase_lev,    // Bounded lock-free worker deques + MPMC ingress.
 };
 
+// Wake policy is independent of the queue backend. The original per-task
+// permit protocol remains the default until idle parking passes full
+// correctness and performance acceptance.
+enum class worker_wakeup
+{
+  per_task_semaphore,
+  idle_parking,
+};
+
 // Prefer named options for new users; positional constructor remains compatible.
 struct thread_pool_options
 {
@@ -35,6 +44,7 @@ struct thread_pool_options
   std::size_t max_pending_tasks = 1024;
   std::span<const std::size_t> worker_affinity = {};
   queue_backend backend = queue_backend::direct_mutex;
+  worker_wakeup wakeup = worker_wakeup::per_task_semaphore;
 };
 
 class thread_pool
@@ -47,7 +57,8 @@ public:
     memory::memory_resource* resource = memory::get_default_resource(),
     std::size_t max_pending_tasks = 1024,
     std::span<const std::size_t> worker_affinity = {},
-    queue_backend backend = queue_backend::direct_mutex);
+    queue_backend backend = queue_backend::direct_mutex,
+    worker_wakeup wakeup = worker_wakeup::per_task_semaphore);
 
   thread_pool(const thread_pool&) = delete;
   thread_pool& operator=(const thread_pool&) = delete;
