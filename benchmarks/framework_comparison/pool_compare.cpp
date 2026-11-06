@@ -67,7 +67,8 @@ options parse(int argc, char** argv) {
       result.workload != "pool_multi_producer" &&
       result.workload != "pool_single_flight" &&
       result.workload != "pool_worker_fanout" &&
-      result.workload != "pool_mixed_compute")
+      result.workload != "pool_mixed_compute" &&
+      result.workload != "pool_staged_pipeline")
     throw std::invalid_argument("unsupported workload");
   return result;
 }
@@ -162,6 +163,27 @@ std::uint64_t compute_digest(std::size_t index) noexcept {
   return value ^ marker;
 }
 
+// Three dependent CPU stages emulate an in-memory decode/transform/pack job.
+// They deliberately exercise nested task submission and end-to-end completion.
+std::uint64_t stage_decode(std::size_t index) noexcept {
+  auto value = static_cast<std::uint64_t>(index) + marker;
+  value ^= value >> 30;
+  return value * 0xbf58476d1ce4e5b9ULL;
+}
+
+std::uint64_t stage_transform(std::uint64_t value) noexcept {
+  value ^= value >> 27;
+  return value * 0x94d049bb133111ebULL;
+}
+
+std::uint64_t stage_pack(std::uint64_t value) noexcept {
+  return (value ^ (value >> 31)) ^ marker;
+}
+
+std::uint64_t pipeline_result(std::size_t index) noexcept {
+  return stage_pack(stage_transform(stage_decode(index)));
+}
+
 std::uint64_t nanos(clock_type::time_point a, clock_type::time_point b) {
   return static_cast<std::uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count());
@@ -171,8 +193,10 @@ void emit(const options& cfg, std::vector<std::uint64_t> latency,
           const std::vector<std::uint64_t>& seen,
           clock_type::time_point began, clock_type::time_point ended) {
   for (std::size_t i = 0; i < seen.size(); ++i) {
-    const auto expected = cfg.workload == "pool_mixed_compute"
-      ? compute_digest(i) : (static_cast<std::uint64_t>(i) ^ marker);
+    const auto expected = cfg.workload == "pool_staged_pipeline"
+      ? pipeline_result(i)
+      : cfg.workload == "pool_mixed_compute"
+        ? compute_digest(i) : (static_cast<std::uint64_t>(i) ^ marker);
     if (seen[i] != expected)
       throw std::runtime_error("missing or incorrect task result: " + std::to_string(i));
   }
@@ -233,6 +257,35 @@ void measure(const options& cfg, scheduler& executor) {
       fanout_done.count_down(); // Root published all child tasks.
     });
     fanout_done.wait();
+    const auto ended = clock_type::now();
+    emit(cfg, std::move(latency), seen, began, ended);
+    return;
+  }
+
+  if (cfg.workload == "pool_staged_pipeline") {
+    // Identical three-stage task chain for every framework. Each task
+    // submits its dependent successor only after writing its stage output.
+    // The number of pending tasks is bounded by the number of active items.
+    std::vector<std::uint64_t> decoded(cfg.operations);
+    std::vector<std::uint64_t> transformed(cfg.operations);
+    const auto began = clock_type::now();
+    for (std::size_t i = 0; i < cfg.operations; ++i) {
+      const auto submitted = clock_type::now();
+      checked_submit(executor, [&, i, submitted] {
+        decoded[i] = stage_decode(i);
+        checked_submit(executor, [&, i, submitted] {
+          transformed[i] = stage_transform(decoded[i]);
+          checked_submit(executor, [&, i, submitted] {
+            seen[i] = stage_pack(transformed[i]);
+            // For this scenario the latency is end-to-end from initial
+            // submission to *final stage completion*, not start delay.
+            latency[i] = nanos(submitted, clock_type::now());
+            done.count_down();
+          });
+        });
+      });
+    }
+    done.wait();
     const auto ended = clock_type::now();
     emit(cfg, std::move(latency), seen, began, ended);
     return;
