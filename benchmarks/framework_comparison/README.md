@@ -83,6 +83,13 @@ PROFILE_WORKERS=4 PROFILE_OPERATIONS=1000000 \
 ```
 
 Linux `perf` and sufficient performance-counter permissions are required.
+By default `PROFILE_SAMPLE_EVENT=cycles:u` records user-space samples only,
+so restricted Linux kernel symbol maps should not prevent application-level
+hotspot analysis. For intentional kernel sampling, use
+`PROFILE_SAMPLE_EVENT=cycles` and configure kernel symbol permissions
+separately. This does not bypass `perf_event_paranoid`: access to CPU
+performance events may still require permission. If supported by the kernel,
+`PROFILE_SAMPLE_EVENT=cpu-clock:u` is an alternative software sampling event.
 The separate profiler build saves `*.perf.data`, `*.perf.report.txt`,
 `*.stat.csv`, `metadata.txt` and the generated `hotspots.md`.
 This **does not replace** the uninstrumented benchmark results. It identifies

@@ -13,6 +13,7 @@ cd "$(git rev-parse --show-toplevel)"
 : "${PROFILE_INCLUDE_COMPETITORS:=1}"
 : "${PROFILE_BUILD_JOBS:=8}"
 : "${PROFILE_FREQUENCY:=499}"
+: "${PROFILE_SAMPLE_EVENT:=cycles:u}"
 
 if [[ -z "$PROFILE_CXX" ]]; then
   echo "ERROR: clang++ is required (set PROFILE_CXX)." >&2; exit 2
@@ -61,6 +62,7 @@ cmake --build "$PROFILE_BUILD_DIR" --parallel "$PROFILE_BUILD_JOBS" --target "${
   printf 'taskset=%s\n' "${PROFILE_TASKSET:-none}"
   printf 'perf_event_paranoid=%s\n' "$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo unknown)"
   printf 'cxx_flags=-O3 -DNDEBUG -g -fno-omit-frame-pointer\n'
+  printf 'sample_event=%s\n' "$PROFILE_SAMPLE_EVENT"
 } > "$PROFILE_OUTPUT/metadata.txt"
 if command -v lscpu >/dev/null 2>&1; then
   lscpu -e=CPU,CORE,SOCKET > "$PROFILE_OUTPUT/cpu_topology.txt" || true
@@ -84,7 +86,11 @@ for workload in "${workloads[@]}"; do
       -o "${stem}.stat.csv" -- "${command[@]}" \
       > "${stem}.stat.stdout" 2> "${stem}.stat.stderr"
 
-    perf record -F "$PROFILE_FREQUENCY" -g --call-graph fp \
+    # Default cycles:u restricts sampling to user-space. Kernel symbols
+    # often are intentionally hidden via kptr_restrict on developer machines.
+    # Override PROFILE_SAMPLE_EVENT=cycles only if kernel profiling is needed
+    # and the host is explicitly configured to resolve kernel addresses.
+    perf record -e "$PROFILE_SAMPLE_EVENT" -F "$PROFILE_FREQUENCY" -g --call-graph fp \
       -o "${stem}.perf.data" -- "${command[@]}" \
       > "${stem}.record.stdout" 2> "${stem}.record.stderr"
 
