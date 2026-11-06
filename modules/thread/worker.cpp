@@ -41,7 +41,7 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
 {
   worker_context context{this, worker_index};
   (void)stop_token; // Shutdown and draining are controlled by work_state_.
-  if (wakeup_ == worker_wakeup::idle_parking)
+  if (parking_)
   {
     worker_loop_idle_parking(worker_index);
     return;

@@ -263,7 +263,7 @@ void idle_waves(std::size_t workers, std::size_t n,
 int main(int argc, char** argv) {
   try {
     if (argc != 4 && argc != 5 && argc != 6)
-      throw std::invalid_argument("usage: scenario workers tasks [injection|direct|chase_lev] [semaphore|park]");
+      throw std::invalid_argument("usage: scenario workers tasks [injection|direct|chase_lev] [semaphore|park|futex]");
     const std::string scenario = argv[1];
     const auto workers = std::stoull(argv[2]), n = std::stoull(argv[3]);
     const std::string backend_name = argc >= 5 ? argv[4] : "injection";
@@ -273,8 +273,10 @@ int main(int argc, char** argv) {
       wakeup = modern::worker_wakeup::per_task_semaphore;
     else if (wakeup_name == "park")
       wakeup = modern::worker_wakeup::idle_parking;
+    else if (wakeup_name == "futex")
+      wakeup = modern::worker_wakeup::idle_parking_futex;
     else
-      throw std::invalid_argument("wakeup must be semaphore or park");
+      throw std::invalid_argument("wakeup must be semaphore, park or futex");
     modern::queue_backend backend;
     if (backend_name == "direct")
       backend = modern::queue_backend::direct_mutex;
