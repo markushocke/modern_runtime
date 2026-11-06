@@ -177,7 +177,7 @@ def main(folder):
         "| Workload | Workers | Framework | Valid / total | Throughput ops/s "
         "(median [min–max]) | p99 µs | Run CV % | Paired median ratio | Wins / pairs |",
         "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
-    ]
+    ])
     high_variance = []
     for line in summary:
         throughput = line["ops_per_second_median"]
