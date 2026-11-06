@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV || defined(COMPARE_MODERN_PARK)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK)
 import modern.runtime;
 #endif
 
@@ -78,7 +78,7 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV || defined(COMPARE_MODERN_PARK)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK)
 #if defined(COMPARE_MODERN_PARK)
 constexpr char framework[] = "modern_chase_lev_park";
 #elif defined(COMPARE_MODERN_CHASE_LEV)
