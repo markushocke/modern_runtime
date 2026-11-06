@@ -92,6 +92,11 @@ performance events may still require permission. If supported by the kernel,
 `PROFILE_SAMPLE_EVENT=cpu-clock:u` is an alternative software sampling event.
 The separate profiler build saves `*.perf.data`, `*.perf.report.txt`,
 `*.stat.csv`, `metadata.txt` and the generated `hotspots.md`.
+The profiler passes `--profile-only` to each adapter: the **normal benchmark**
+still verifies every result and computes percentiles, but profile-only runs
+omit the expensive post-measurement sort and repeated result recomputation.
+Consequently, profile-only runs are for diagnosing CPU behavior, **not** for
+independent correctness acceptance or latency reporting.
 This **does not replace** the uninstrumented benchmark results. It identifies
 sampled CPU hotspots; use the full call graph and counters to verify a
 hypothesis before optimizing.

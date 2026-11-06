@@ -63,6 +63,7 @@ cmake --build "$PROFILE_BUILD_DIR" --parallel "$PROFILE_BUILD_JOBS" --target "${
   printf 'perf_event_paranoid=%s\n' "$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo unknown)"
   printf 'cxx_flags=-O3 -DNDEBUG -g -fno-omit-frame-pointer\n'
   printf 'sample_event=%s\n' "$PROFILE_SAMPLE_EVENT"
+  printf 'profile_only=1 (post-run validation performed only in normal benchmark)\n'
 } > "$PROFILE_OUTPUT/metadata.txt"
 if command -v lscpu >/dev/null 2>&1; then
   lscpu -e=CPU,CORE,SOCKET > "$PROFILE_OUTPUT/cpu_topology.txt" || true
@@ -75,7 +76,7 @@ for workload in "${workloads[@]}"; do
     stem="$PROFILE_OUTPUT/${workload}-${name}-w${PROFILE_WORKERS}"
     command=("$binary" --workers "$PROFILE_WORKERS" \
       --producers "$PROFILE_PRODUCERS" --operations "$PROFILE_OPERATIONS" \
-      --workload "$workload")
+      --workload "$workload" --profile-only)
     if [[ -n "${PROFILE_TASKSET:-}" ]]; then
       command=(taskset -c "$PROFILE_TASKSET" "${command[@]}")
     fi

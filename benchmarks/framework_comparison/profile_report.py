@@ -10,20 +10,25 @@ SYMBOL = re.compile(r"\[[^\]]+\]\s*(.*)$")
 
 def category(symbol):
     text = symbol.lower()
+    if "emit(" in text or "std::__introsort_loop" in text or "std::__final_insertion_sort" in text:
+        return "Benchmark post-processing"
+    if "move_only_function::model" in text or "std::_function_handler" in text:
+        return "Callable execution/type-erasure"
     if any(x in text for x in ("pthread_mutex", "mutex", "futex", "lll_lock")):
         return "Mutex/futex"
     if any(x in text for x in ("sem_wait", "sem_post", "semaphore", "sched_yield", "nanosleep")):
         return "Waiting/wakeup"
     if any(x in text for x in ("malloc", "operator new", "operator delete",
-                               "allocate", "deallocate", "memory_resource")):
-        return "Allocation/PMR"
+                               "allocate", "deallocate", "memory_resource",
+                               "_int_free", "cfree", "free@", "get_default_resource")):
+        return "Allocator / memory management"
     if any(x in text for x in ("bounded_mpmc", "chase_lev", "compare_exchange",
                                "atomic", "steal_task", "pop_local", "push_owner")):
         return "Queue/atomics"
     if any(x in text for x in ("thread_pool", "scheduler", "modern::",
                                "taskflow", "onetbb", "tbb::", "tf::")):
         return "Scheduler/runtime"
-    return "Other (possibly task body)"
+    return "Other / unclassified"
 
 def symbols(path):
     records = []
@@ -47,7 +52,10 @@ def main(root):
         "# Scheduler profiling: hotspot inspection",
         "",
         "Separate symbolized Release runs; samples are self-overhead, not",
-        "inclusive costs. Categories are heuristics. Inspect the associated",
+        "inclusive costs. Classification is heuristic, not a wall-time",
+        "breakdown. This profile-only mode omits post-run benchmark sorting",
+        "and output validation; the normal throughput runner must validate",
+        "tasks separately. Inspect the associated",
         "perf.data call graphs and stat.csv hardware counters before editing.",
         "These are NOT the uninstrumented throughput benchmark results.",
         "",

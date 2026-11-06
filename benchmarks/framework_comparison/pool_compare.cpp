@@ -38,6 +38,7 @@ struct options {
   std::size_t producers = 4;
   std::size_t operations = 100000;
   std::string workload = "pool_multi_producer";
+  bool profile_only = false;
 };
 
 std::size_t positive(const char* text) {
@@ -51,10 +52,14 @@ std::size_t positive(const char* text) {
 
 options parse(int argc, char** argv) {
   options result;
-  for (int i = 1; i < argc; i += 2) {
-    if (i + 1 >= argc) throw std::invalid_argument("expected --key value pairs");
-    const std::string key = argv[i];
-    const std::string value = argv[i + 1];
+  for (int i = 1; i < argc;) {
+    const std::string key = argv[i++];
+    if (key == "--profile-only") {
+      result.profile_only = true;
+      continue;
+    }
+    if (i >= argc) throw std::invalid_argument("expected --key value pairs");
+    const std::string value = argv[i++];
     if (key == "--workers") result.workers = positive(value.c_str());
     else if (key == "--producers") result.producers = positive(value.c_str());
     else if (key == "--operations") result.operations = positive(value.c_str());
@@ -258,7 +263,10 @@ void measure(const options& cfg, scheduler& executor) {
     });
     fanout_done.wait();
     const auto ended = clock_type::now();
-    emit(cfg, std::move(latency), seen, began, ended);
+    // The normal benchmark validates/sorts as before. Profiling omits
+    // post-run validation and sort to avoid contaminating CPU samples.
+    if (!cfg.profile_only)
+      emit(cfg, std::move(latency), seen, began, ended);
     return;
   }
 
@@ -287,7 +295,10 @@ void measure(const options& cfg, scheduler& executor) {
     }
     done.wait();
     const auto ended = clock_type::now();
-    emit(cfg, std::move(latency), seen, began, ended);
+    // The normal benchmark validates/sorts as before. Profiling omits
+    // post-run validation and sort to avoid contaminating CPU samples.
+    if (!cfg.profile_only)
+      emit(cfg, std::move(latency), seen, began, ended);
     return;
   }
 
@@ -306,7 +317,10 @@ void measure(const options& cfg, scheduler& executor) {
     }
     done.wait();
     const auto ended = clock_type::now();
-    emit(cfg, std::move(latency), seen, began, ended);
+    // The normal benchmark validates/sorts as before. Profiling omits
+    // post-run validation and sort to avoid contaminating CPU samples.
+    if (!cfg.profile_only)
+      emit(cfg, std::move(latency), seen, began, ended);
     return;
   }
 
@@ -316,7 +330,10 @@ void measure(const options& cfg, scheduler& executor) {
     for (std::size_t i = 0; i < cfg.operations; ++i) submit_at(i);
     done.wait();
     const auto ended = clock_type::now();
-    emit(cfg, std::move(latency), seen, began, ended);
+    // The normal benchmark validates/sorts as before. Profiling omits
+    // post-run validation and sort to avoid contaminating CPU samples.
+    if (!cfg.profile_only)
+      emit(cfg, std::move(latency), seen, began, ended);
     return;
   }
 
@@ -338,7 +355,10 @@ void measure(const options& cfg, scheduler& executor) {
   for (auto& writer : writers) writer.join();
   done.wait();
   const auto ended = clock_type::now();
-  emit(cfg, std::move(latency), seen, began, ended);
+  // The normal benchmark validates/sorts as before. Profiling omits
+  // post-run validation and sort to avoid contaminating CPU samples.
+  if (!cfg.profile_only)
+    emit(cfg, std::move(latency), seen, began, ended);
 }
 }
 
