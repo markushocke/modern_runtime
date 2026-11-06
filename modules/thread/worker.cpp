@@ -3,6 +3,7 @@ module;
 #include <atomic>
 #include <exception>
 #include "../detail/task_semaphore.hpp"
+#include "../detail/worker_parking.hpp
 #include "../detail/move_only_function_support.hpp"
 #include "../detail/intrusive_queue.hpp"
 
