@@ -29,6 +29,15 @@ modern::thread_pool lock_free_pool{modern::thread_pool_options{
   .backend = modern::queue_backend::injection_chase_lev
 }};
 
+// Opt-in idle parking: preserves the same Chase-Lev queues but replaces
+// one POSIX semaphore permit per task with targeted worker wakeups.
+modern::thread_pool parked{modern::thread_pool_options{
+  .workers = 8,
+  .max_pending_tasks = 4096,
+  .backend = modern::queue_backend::injection_chase_lev,
+  .wakeup = modern::worker_wakeup::idle_parking
+}};
+
 // Make the original backend explicit for A/B comparisons.
 modern::thread_pool classic{modern::thread_pool_options{
   .workers = 8,
@@ -80,6 +89,36 @@ public `scheduler` and `submit` APIs do not change.
   pool-level queue capacity, shutdown/drain and exception rollback semantics.
   Priorities are local best-effort, not strict global ordering.
 
+## Wakeup policy (independent of the queue backend)
+
+A separate `worker_wakeup` setting now controls how a worker sleeps and wakes,
+without modifying `queue_strategy` or `scheduler`. The default remains
+`per_task_semaphore` for existing callers and ABI-conscious migration.
+The optional `idle_parking` mode is experimental:
+
+- Workers first check their local, injection and steal queues without taking
+  a semaphore permit for every task. Successful dequeues continue immediately.
+- On empty scans, workers register in a PMR-backed array of per-worker atomic
+  parking slots. They **recheck** queues, accepted-task count and shutdown
+  state after registration. A publisher reserves a parked worker with a CAS/
+  exchange, advances its epoch, and notifies only that worker.
+- A sequence-cst ordering between accepted-task publication, sleeper
+  registration and the final pending-state check ensures that a task cannot
+  be published concurrently with an unnoticed transition to sleep.
+- If an accepted task exists but has not yet been claimed, a failed scan
+  retries with CPU-relax and periodically yields instead of parking on
+  undeliverable work. Do not change this check without proving progress.
+- Shutdown notifies all parked workers when pending tasks reach zero. All
+  sleepers must be joined before the parking slots are released.
+
+This changes *worker parking*, not the underlying task queues. All three queue
+backends can use either wakeup mode. The idle parking mode may consume more
+CPU while pending but not yet published work exists; test under contention.
+Its `std::atomic::wait` is not the positive-counter POSIX semaphore
+implementation that previously caused the Linux libstdc++ 13 lost-permit
+issue. It still needs sanitizer, repeated idle-wakeup, shutdown and lifecycle
+acceptance before default promotion.
+
 ## Tradeoffs and forward compatibility
 
 `injection_mutex_local` is deliberately conservative: it separates external
@@ -114,6 +153,12 @@ ctest --test-dir build/kpi --output-on-failure -L pool
 The stress suite exercises the same eight scenarios against all three backends,
 including work produced by a running worker, external multi-producer load,
 bounded queues, shutdown races, allocation failure and task cancellation.
+
+The standalone `worker_parking_primitives` CTest validates concurrent
+parking registration and wakeups. The `pool_park_chase_lev_*` matrix repeats
+all pool lifecycle/race scenarios at 1/2/4/8/16 workers, plus `idle_waves`
+that forces repeated idle->active transitions. Extra 1/4/16 worker tests
+exercise idle parking with the two mutex-backed queue strategies.
 
 The standalone `lock_free_queue_primitives` CTest also checks 2-, 32- and
 256-slot rings under competing producers and consumers. Stress tests should
