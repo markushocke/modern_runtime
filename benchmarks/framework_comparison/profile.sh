@@ -98,6 +98,13 @@ for workload in "${workloads[@]}"; do
     perf report --stdio --no-children --sort=symbol -n \
       --percent-limit=0.25 -i "${stem}.perf.data" \
       > "${stem}.perf.report.txt"
+
+    # A third, independent run splits voluntary from involuntary context
+    # switches. Never treat this as a simultaneous perf-stat measurement.
+    if [[ -x /usr/bin/time ]]; then
+      /usr/bin/time -v -o "${stem}.time.txt" -- "${command[@]}" \
+        > "${stem}.time.stdout" 2> "${stem}.time.stderr"
+    fi
   done
 done
 
