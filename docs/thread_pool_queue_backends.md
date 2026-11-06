@@ -38,6 +38,15 @@ modern::thread_pool parked{modern::thread_pool_options{
   .wakeup = modern::worker_wakeup::idle_parking
 }};
 
+// Linux-only experiment: identical Chase-Lev queue and idle detection,
+// but direct FUTEX_WAIT_PRIVATE instead of std::atomic::wait.
+modern::thread_pool futex_pool{modern::thread_pool_options{
+  .workers = 8,
+  .max_pending_tasks = 4096,
+  .backend = modern::queue_backend::injection_chase_lev,
+  .wakeup = modern::worker_wakeup::idle_parking_futex
+}};
+
 // Make the original backend explicit for A/B comparisons.
 modern::thread_pool classic{modern::thread_pool_options{
   .workers = 8,
@@ -119,6 +128,26 @@ implementation that previously caused the Linux libstdc++ 13 lost-permit
 issue. It still needs sanitizer, repeated idle-wakeup, shutdown and lifecycle
 acceptance before default promotion.
 
+### Linux direct-futex parking experiment
+
+`worker_wakeup::idle_parking_futex` is an additional opt-in Linux-only
+wakeup strategy. It retains the exact queue, pending-slot admission,
+waiter selection, shutdown rules, and post-registration recheck used by
+`idle_parking`, but replaces its 64-bit `std::atomic::wait` with a 32-bit
+futex epoch and `FUTEX_WAIT_PRIVATE` / `FUTEX_WAKE_PRIVATE`.
+The futex wait compares the epoch atomically with sleeping; EAGAIN means
+a notifier raced ahead, while EINTR is retried. A sequentially consistent
+publication/recheck protocol still protects against lost notifications.
+On non-Linux systems, selecting this mode throws `std::invalid_argument`.
+
+This is a **measurement hypothesis**, not a validated speedup.
+A libstdc++ `_S_do_spin_v` perf symbol alone does not establish the
+caller: the benchmark's `std::latch` may use the same implementation.
+Verify full call graphs, compare normal runs and both parking modes, and
+use stress/sanitizer tests before promoting the direct-futex implementation.
+A future profiler should distinguish idle parks, spin retries, and
+successful/failed steals via counters.
+
 ## Tradeoffs and forward compatibility
 
 `injection_mutex_local` is deliberately conservative: it separates external
@@ -153,6 +182,10 @@ ctest --test-dir build/kpi --output-on-failure -L pool
 The stress suite exercises the same eight scenarios against all three backends,
 including work produced by a running worker, external multi-producer load,
 bounded queues, shutdown races, allocation failure and task cancellation.
+
+The Linux `pool_futex_chase_lev_*` CTests repeat all nine parking
+scenarios for 1/2/4/8/16 workers. The standalone primitive test also
+exercises both atomic-wait and direct-futex parking on Linux.
 
 The standalone `worker_parking_primitives` CTest validates concurrent
 parking registration and wakeups. The `pool_park_chase_lev_*` matrix repeats
