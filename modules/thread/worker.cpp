@@ -90,6 +90,22 @@ void thread_pool_state::worker_loop(std::size_t worker_index, std::stop_token st
 void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
 {
   std::size_t next_victim = worker_index + 1;
+  std::size_t empty_scans = 0;
+
+  auto idle_retry = [&]() noexcept
+  {
+    // A contended scan must not call sched_yield() on every missing task.
+    // Keep a brief CPU-relax window before yielding to oversubscribed peers.
+    if ((++empty_scans & 63u) == 0)
+      std::this_thread::yield();
+#if defined(__i386__) || defined(__x86_64__)
+    else
+      __builtin_ia32_pause();
+#else
+    else
+      std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+  };
 
   auto find_task = [&]() -> move_only_function
   {
@@ -106,6 +122,7 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
   {
     if (auto task = find_task())
     {
+      empty_scans = 0;
       finish_pending_slot();
       task();
       continue;
@@ -120,10 +137,11 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     // remains unclaimed, otherwise the entire pool might sleep on work.
     if ((state & pending_mask) != 0)
     {
-      std::this_thread::yield();
+      idle_retry();
       continue;
     }
 
+    empty_scans = 0;
     const auto epoch = parking_->prepare(worker_index);
     // Recheck AFTER becoming visible to notifiers. A producer that
     // published before registration cannot cause a lost wakeup.
@@ -148,7 +166,7 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     if ((state & pending_mask) != 0)
     {
       parking_->cancel(worker_index);
-      std::this_thread::yield();
+      idle_retry();
       continue;
     }
 
