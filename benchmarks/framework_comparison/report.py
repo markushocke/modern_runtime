@@ -75,6 +75,57 @@ def main(folder):
         "measurement round. A value above 1.0 means the competitor was faster. "
         "Missing/failed pairs are omitted from the ratio but remain counted as failures.",
         "",
+    ]
+    present = {row["framework"] for row in summary}
+    if not {"taskflow", "onetbb"} <= present:
+        out.extend([
+            "**Backend diagnostic ONLY:** the result omits Taskflow and/or oneTBB. "
+            "Do not call this a complete framework comparison.",
+            "",
+        ])
+    # Product-relevant cases come first; raw dispatch stays below as a
+    # diagnostic. Show competitors even if the runtime-only mode omitted them.
+    out.extend([
+        "## Real-use-case scorecard (4 and 8 workers)",
+        "",
+        "| Workload | Workers | Framework | Valid | Ops/s median | "
+        "Paired vs direct | Wins/pairs | p99 µs | Run CV % |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    practical = ("pool_worker_fanout", "pool_mixed_compute")
+    for workload in practical:
+        for workers in (4, 8):
+            for row in summary:
+                if row["workload"] != workload or row["workers"] != workers:
+                    continue
+                if row["paired_runs"] and row["failed_runs"] == 0:
+                    ratio = f"{row['paired_ratio_median']:.2f}x"
+                    wins = ("reference" if row["framework"] == "modern_runtime" else
+                            f"{row['paired_wins']}/{row['paired_runs']}")
+                else:
+                    ratio, wins = "n/a", "n/a"
+                p99 = row["p99_ns_median"]
+                cv = row["ops_per_second_cv_percent"]
+                out.append(
+                    f"| {workload} | {workers} | {row['framework']} | "
+                    f"{row['successful_runs']}/"
+                    f"{row['successful_runs'] + row['failed_runs']} | "
+                    f"{fmt(row['ops_per_second_median'])} | {ratio} | {wins} | "
+                    f"{p99 / 1000:.2f} | {fmt(cv)} |"
+                    if p99 is not None else
+                    f"| {workload} | {workers} | {row['framework']} | "
+                    f"{row['successful_runs']}/"
+                    f"{row['successful_runs'] + row['failed_runs']} | "
+                    f"{fmt(row['ops_per_second_median'])} | {ratio} | {wins} | n/a | {fmt(cv)} |"
+                )
+    out.extend([
+        "",
+        "**Note:** fanout measures locally spawned tasks; mixed_compute includes "
+        "the identical deterministic CPU body for all frameworks. Interpret paired "
+        "ratios only when run CV and platform conditions are acceptable.",
+        "",
+        "## Full matrix (including low-level diagnostics)",
+        "",
         "| Workload | Workers | Framework | Valid / total | Throughput ops/s "
         "(median [min–max]) | p99 µs | Run CV % | Paired median ratio | Wins / pairs |",
         "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
