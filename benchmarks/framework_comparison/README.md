@@ -3,6 +3,7 @@
 **Canonical scope and next steps:** [BENCHMARK_PLAN.md](BENCHMARK_PLAN.md).
 The primary question is practical C++23 execution workloads versus Taskflow
 and oneTBB. Queue microbenchmarks are only an internal diagnostic layer.
+For the complete comparison explicitly use COMPARE_ONLY_RUNTIME=0.
 
 This folder is **benchmark infrastructure only**. The production runtime is not
 modified. New runtime development goes into `dev`; changes are then merged from

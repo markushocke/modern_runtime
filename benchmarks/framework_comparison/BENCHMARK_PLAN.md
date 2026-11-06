@@ -1,6 +1,6 @@
 # CURRENT BENCHMARK PLAN — modern_runtime vs Taskflow and oneTBB
 
-Status: benchmarking infrastructure and first two use-case workloads committed.
+Status: benchmarking infrastructure and three initial representative use-case workloads committed.
 **Full integration build, sanitizers, and fresh on-host results have NOT been
 verified for these changes. Do not publish a ranking until those checks pass.**
 Last reviewed: 2026-11-06.
@@ -86,13 +86,13 @@ Fast full-framework smoke:
 
     git switch bench/framework-comparison
     git pull --ff-only
-    COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 COMPARE_WORKERS="1 4" \
+    COMPARE_ONLY_RUNTIME=0 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 COMPARE_WORKERS="1 4" \
       COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute" \
       bash benchmarks/framework_comparison/run.sh
 
 Comparable full result (20 repeats per configuration):
 
-    COMPARE_RUNS=20 COMPARE_OPERATIONS=100000 COMPARE_WORKERS="1 2 4 8" \
+    COMPARE_ONLY_RUNTIME=0 COMPARE_RUNS=20 COMPARE_OPERATIONS=100000 COMPARE_WORKERS="1 2 4 8" \
       bash benchmarks/framework_comparison/run.sh
 
 Profiling (independent, instrumented and symbolized build):

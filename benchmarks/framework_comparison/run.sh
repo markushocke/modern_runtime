@@ -29,6 +29,9 @@ fi
 compare_external=ON
 if [[ "$COMPARE_ONLY_RUNTIME" == "1" ]]; then
   compare_external=OFF
+  echo "WARNING: runtime-only diagnostics; Taskflow and oneTBB will NOT be measured." >&2
+else
+  echo "Full framework comparison: three runtime backends, Taskflow, oneTBB." >&2
 fi
 
 cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
