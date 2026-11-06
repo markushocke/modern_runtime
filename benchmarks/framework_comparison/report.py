@@ -84,6 +84,51 @@ def main(folder):
             "Do not call this a complete framework comparison.",
             "",
         ])
+    # Paired A/B: EXACT same Chase-Lev queues, only the worker parking policy
+    # differs. Invalid runs on either side never enter the paired estimate.
+    out.extend([
+        "## Idle parking A/B: Chase-Lev with vs without per-task semaphore",
+        "",
+        "This section compares identical queues with different wakeup policies.",
+        "A ratio above 1.0 means idle parking was faster than the semaphore.",
+        "Context switches must be checked independently in perf stat/time -v.",
+        "",
+        "| Workload | Workers | Paired runs | Parking / semaphore throughput | "
+        "Parking wins | Parking / semaphore p99 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    configs = sorted({(row["workload"], int(row["workers"])) for row in rows})
+    for workload, workers in configs:
+        speed_ratios = []
+        tail_ratios = []
+        for repeat in sorted({row["run"] for row in rows
+                              if row["workload"] == workload
+                              and int(row["workers"]) == workers}):
+            park = by_run.get((workload, workers, repeat, "modern_chase_lev_park"))
+            base = by_run.get((workload, workers, repeat, "modern_chase_lev"))
+            if not park or not base or any(
+                r["valid"] != "1" or r["returncode"] != "0"
+                for r in (park, base)
+            ):
+                continue
+            throughput = float(base["ops_per_second"])
+            p99 = float(base["p99_ns"])
+            if throughput > 0:
+                speed_ratios.append(float(park["ops_per_second"]) / throughput)
+            if p99 > 0:
+                tail_ratios.append(float(park["p99_ns"]) / p99)
+        ratio = f"{statistics.median(speed_ratios):.2f}x" if speed_ratios else "n/a"
+        wins = f"{sum(x > 1 for x in speed_ratios)}/{len(speed_ratios)}" if speed_ratios else "n/a"
+        p99ratio = f"{statistics.median(tail_ratios):.2f}x" if tail_ratios else "n/a"
+        out.append(f"| {workload} | {workers} | {len(speed_ratios)} | "
+                   f"{ratio} | {wins} | {p99ratio} |")
+    out.extend([
+        "",
+        "p99 < 1.0x indicates lower latency with idle parking. Paired ratios "
+        "remain exploratory if the independent run CV is high.",
+        "",
+    ])
+
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([
