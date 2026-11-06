@@ -158,6 +158,19 @@ def main(root):
         lines.append(f"| {workload} | {workers} | {ratio} |")
     lines.extend([
         "",
+        "### Direct futex / atomic-wait parking (same queues)",
+        "",
+        "| Workload | Workers | CS ratio futex/atomic |",
+        "| --- | ---: | ---: |",
+    ])
+    for (workload, workers, backend), atomic_cs in sorted(by_workload.items()):
+        if backend != "modern_chase_lev_park":
+            continue
+        futex_cs = by_workload.get((workload, workers, "modern_chase_lev_futex"))
+        ratio = f"{futex_cs / atomic_cs:.4f}x" if atomic_cs and futex_cs is not None else "n/a"
+        lines.append(f"| {workload} | {workers} | {ratio} |")
+    lines.extend([
+        "",
         "Values below 1.0x indicate fewer context switches. Every variant",
         "was recorded in a separate process; ratios are exploratory.",
         "",
