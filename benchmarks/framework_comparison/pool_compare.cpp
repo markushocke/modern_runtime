@@ -65,7 +65,9 @@ options parse(int argc, char** argv) {
     throw std::invalid_argument("workers and producers must be <= 256");
   if (result.workload != "pool_dispatch" &&
       result.workload != "pool_multi_producer" &&
-      result.workload != "pool_single_flight")
+      result.workload != "pool_single_flight" &&
+      result.workload != "pool_worker_fanout" &&
+      result.workload != "pool_mixed_compute")
     throw std::invalid_argument("unsupported workload");
   return result;
 }
@@ -146,6 +148,20 @@ template<class F> void checked_submit(scheduler& executor, F&& f) {
   }
 }
 
+// Mixed CPU work approximates a batch of cheap event handlers plus occasional
+// expensive parse/transform steps. All adapters execute exactly the same
+// deterministic integer workload, with no external library cost.
+std::uint64_t compute_digest(std::size_t index) noexcept {
+  std::uint64_t value = static_cast<std::uint64_t>(index) ^ marker;
+  const auto iterations = (index % 16 == 0) ? 2048u : 64u;
+  for (unsigned step = 0; step < iterations; ++step) {
+    value ^= value >> 33;
+    value *= 0xff51afd7ed558ccdULL;
+    value += 0x9e3779b97f4a7c15ULL + step;
+  }
+  return value ^ marker;
+}
+
 std::uint64_t nanos(clock_type::time_point a, clock_type::time_point b) {
   return static_cast<std::uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count());
@@ -154,9 +170,12 @@ std::uint64_t nanos(clock_type::time_point a, clock_type::time_point b) {
 void emit(const options& cfg, std::vector<std::uint64_t> latency,
           const std::vector<std::uint64_t>& seen,
           clock_type::time_point began, clock_type::time_point ended) {
-  for (std::size_t i = 0; i < seen.size(); ++i)
-    if (seen[i] != (static_cast<std::uint64_t>(i) ^ marker))
+  for (std::size_t i = 0; i < seen.size(); ++i) {
+    const auto expected = cfg.workload == "pool_mixed_compute"
+      ? compute_digest(i) : (static_cast<std::uint64_t>(i) ^ marker);
+    if (seen[i] != expected)
       throw std::runtime_error("missing or incorrect task result: " + std::to_string(i));
+  }
   std::sort(latency.begin(), latency.end());
   const auto pct = [&](double q) {
     const auto rank = std::max<std::size_t>(
@@ -190,10 +209,34 @@ void measure(const options& cfg, scheduler& executor) {
     const auto submitted = clock_type::now();
     checked_submit(executor, [&, i, submitted] {
       latency[i] = nanos(submitted, clock_type::now());
-      seen[i] = static_cast<std::uint64_t>(i) ^ marker;
+      seen[i] = cfg.workload == "pool_mixed_compute"
+        ? compute_digest(i) : (static_cast<std::uint64_t>(i) ^ marker);
       done.count_down();
     });
   };
+
+  // Models a recursive build/asset-processing job: an external request starts
+  // one worker, then that worker creates the actual independent sub-jobs.
+  // It deliberately exercises worker-local enqueue and work stealing.
+  if (cfg.workload == "pool_worker_fanout") {
+    std::latch fanout_done(static_cast<std::ptrdiff_t>(cfg.operations + 1));
+    const auto began = clock_type::now();
+    checked_submit(executor, [&] {
+      for (std::size_t i = 0; i < cfg.operations; ++i) {
+        const auto submitted = clock_type::now();
+        checked_submit(executor, [&, i, submitted] {
+          latency[i] = nanos(submitted, clock_type::now());
+          seen[i] = static_cast<std::uint64_t>(i) ^ marker;
+          fanout_done.count_down();
+        });
+      }
+      fanout_done.count_down(); // Root published all child tasks.
+    });
+    fanout_done.wait();
+    const auto ended = clock_type::now();
+    emit(cfg, std::move(latency), seen, began, ended);
+    return;
+  }
 
   if (cfg.workload == "pool_single_flight") {
     std::binary_semaphore flight{0};
@@ -214,7 +257,8 @@ void measure(const options& cfg, scheduler& executor) {
     return;
   }
 
-  if (cfg.workload == "pool_dispatch") {
+  if (cfg.workload == "pool_dispatch" ||
+      cfg.workload == "pool_mixed_compute") {
     const auto began = clock_type::now();
     for (std::size_t i = 0; i < cfg.operations; ++i) submit_at(i);
     done.wait();
