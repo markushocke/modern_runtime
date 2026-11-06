@@ -46,6 +46,10 @@ cmake -S benchmarks/framework_comparison -B "$PROFILE_BUILD_DIR" -G Ninja \
 
 names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park)
 targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park)
+if [[ "$(uname -s)" == "Linux" ]]; then
+  names+=(modern_chase_lev_futex)
+  targets+=(compare_modern_chase_lev_futex)
+fi
 if [[ "$PROFILE_INCLUDE_COMPETITORS" == 1 ]]; then
   names+=(taskflow onetbb)
   targets+=(compare_taskflow_binary compare_onetbb_binary)

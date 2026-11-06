@@ -31,7 +31,7 @@ if [[ "$COMPARE_ONLY_RUNTIME" == "1" ]]; then
   compare_external=OFF
   echo "WARNING: runtime-only diagnostics; Taskflow and oneTBB will NOT be measured." >&2
 else
-  echo "Full framework comparison: four runtime variants (incl. idle park), Taskflow, oneTBB." >&2
+  echo "Full framework comparison: runtime queue/wake variants, Taskflow, oneTBB." >&2
 fi
 
 cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
@@ -43,6 +43,9 @@ cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCOMPARE_FETCH_DEPS=ON
 
 targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park)
+if [[ "$(uname -s)" == "Linux" ]]; then
+  targets+=(compare_modern_chase_lev_futex)
+fi
 if [[ "$COMPARE_ONLY_RUNTIME" != "1" ]]; then
   targets+=(compare_taskflow_binary compare_onetbb_binary)
 fi
@@ -59,6 +62,9 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
       --binary "modern_chase_lev=$COMPARE_BUILD_DIR/compare_modern_chase_lev" \
       --binary "modern_chase_lev_park=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park")
+if [[ "$(uname -s)" == "Linux" ]]; then
+  args+=(--binary "modern_chase_lev_futex=$COMPARE_BUILD_DIR/compare_modern_chase_lev_futex")
+fi
 if [[ "$COMPARE_ONLY_RUNTIME" != "1" ]]; then
   args+=(--binary "taskflow=$COMPARE_BUILD_DIR/compare_taskflow_binary"
         --binary "onetbb=$COMPARE_BUILD_DIR/compare_onetbb_binary")
