@@ -107,7 +107,7 @@ hypothesis before optimizing.
 - `COMPARE_RUNS=10` — independent processes per configuration
 - `COMPARE_OPERATIONS=100000` — tasks per process
 - `COMPARE_PRODUCERS=4` — producers for multi-producer
-- `COMPARE_WORKERS="1 2 4 8 16"` — worker count matrix
+- `COMPARE_WORKERS="1 2 4 6 8 12 16"` — worker count matrix
 - `COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute pool_staged_pipeline pool_dispatch pool_multi_producer pool_single_flight"` — workload matrix
 - `COMPARE_TASKSET="2-7"` — optional Linux CPU affinity mask
 - `COMPARE_BUILD_JOBS=8` — parallel compiler jobs

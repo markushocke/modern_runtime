@@ -49,7 +49,7 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
   correct output checks. A p99 under saturation includes backlog.
 - All competitors must process identical inputs and task bodies. Do not compare
   the fastest backend with a competitor's more expensive unrelated API.
-- Include worker-count scaling (1/2/4/8, and 16 labeled oversubscription
+- Include worker-count scaling (1/2/4/6/8/12/16, and 16 labeled oversubscription
   on the six-physical-core i7-8700K). Pin to **actual physical cores** using
   lscpu's CPU/CORE map. Use the same CPU affinity and build settings.
 - Default main comparison includes Taskflow and oneTBB. Do not silently
@@ -63,7 +63,7 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
 ## Profiling protocol (diagnosis, not comparative score)
 
 1. Identify an adverse case with the uninstrumented *full* comparison. Focus
-   on P1 fanout, staged pipeline and mixed CPU at 4/8 workers.
+   on P1 fanout, staged pipeline and mixed CPU at 4/6/8/12/16 workers.
 2. Run profile.sh separately: it builds an optimized library with frame
    pointers and DWARF debug symbols, runs perf stat counters and samples
    CPU stacks with perf record. Default: all six variants, P1 scenarios.
@@ -96,7 +96,7 @@ Fast full-framework smoke:
 
 Comparable full result (20 repeats per configuration):
 
-    COMPARE_ONLY_RUNTIME=0 COMPARE_RUNS=20 COMPARE_OPERATIONS=100000 COMPARE_WORKERS="1 2 4 8" \
+    COMPARE_ONLY_RUNTIME=0 COMPARE_RUNS=20 COMPARE_OPERATIONS=100000 COMPARE_WORKERS="1 2 4 6 8 12 16" \
       bash benchmarks/framework_comparison/run.sh
 
 Profiling (independent, instrumented and symbolized build):
@@ -107,10 +107,10 @@ Profiling (independent, instrumented and symbolized build):
 Optional: choose PROFILE_TASKSET and COMPARE_TASKSET based on
 lscpu -e=CPU,CORE,SOCKET, not an assumed numbering scheme.
 
-Validation for the lock-free backend:
+Validation for the new idle-parking policy and original lock-free backend:
 
     cmake --preset kpi && cmake --build --preset kpi -j8
-    ctest --test-dir build/kpi -R 'lock_free_queue_primitives|pool_chase_lev_' \
+    ctest --test-dir build/kpi -R 'worker_parking_primitives|pool_park_|lock_free_queue_primitives|pool_chase_lev_' \
       --output-on-failure
 
 ## Next concrete steps

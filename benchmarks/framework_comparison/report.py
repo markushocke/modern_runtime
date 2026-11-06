@@ -132,7 +132,7 @@ def main(folder):
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([
-        "## Real-use-case scorecard (4 and 8 workers)",
+        "## Real-use-case scorecard (4, 6, 8, 12 and 16 workers)",
         "",
         "| Workload | Workers | Framework | Valid | Ops/s median | "
         "Paired vs direct | Wins/pairs | p99 µs | Run CV % |",
@@ -140,7 +140,7 @@ def main(folder):
     ])
     practical = ("pool_worker_fanout", "pool_mixed_compute", "pool_staged_pipeline")
     for workload in practical:
-        for workers in (4, 8):
+        for workers in (4, 6, 8, 12, 16):
             for row in summary:
                 if row["workload"] != workload or row["workers"] != workers:
                     continue
