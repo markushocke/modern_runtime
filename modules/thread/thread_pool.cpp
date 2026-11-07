@@ -9,6 +9,8 @@ module;
 #include "../detail/intrusive_queue.hpp"
 
 #include <cstddef>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -143,6 +145,7 @@ thread_pool_state::thread_pool_state(
       : (max_pending_tasks > pending_mask ? pending_mask : max_pending_tasks)),
     backend_(backend),
     wakeup_(wakeup),
+    diagnostics_(resource_),
     workers_(resource_),
     worker_affinity_(worker_affinity.begin(), worker_affinity.end(), resource_)
 {
@@ -195,6 +198,11 @@ void thread_pool_state::start(std::size_t thread_count)
       thread_count, resource_, wakeup_ == worker_wakeup::idle_parking_futex);
   else if (wakeup_ != worker_wakeup::per_task_semaphore)
     throw std::invalid_argument("unknown worker_wakeup");
+  // Read only at construction time. No hot-loop environment lookup.
+  if (const char* env = std::getenv("MODERN_RUNTIME_WORKER_DIAGNOSTICS"))
+    diagnostic_enabled_ = env[0] == '1' && env[1] == '\0';
+  if (diagnostic_enabled_ && parking_)
+    diagnostics_.resize(thread_count);
   workers_.reserve(thread_count);
 
   for (std::size_t i = 0; i < thread_count; ++i)
@@ -304,6 +312,43 @@ void thread_pool_state::join()
     if (worker.joinable())
       worker.join();
   }
+  if (diagnostic_enabled_ && !diagnostics_printed_ && parking_)
+  {
+    diagnostics_printed_ = true;
+    print_worker_diagnostics();
+  }
+}
+
+void thread_pool_state::print_worker_diagnostics() const
+{
+  diagnostic_counts total;
+  for (const auto& item : diagnostics_)
+  {
+    total.scans += item.scans;
+    total.local_hits += item.local_hits;
+    total.injected_hits += item.injected_hits;
+    total.steal_hits += item.steal_hits;
+    total.steal_misses += item.steal_misses;
+    total.pending_retries += item.pending_retries;
+    total.park_prepares += item.park_prepares;
+    total.park_cancels += item.park_cancels;
+    total.park_waits += item.park_waits;
+    total.park_returns += item.park_returns;
+    total.tasks_executed += item.tasks_executed;
+  }
+  std::cerr << "[modern-runtime-worker-diagnostics]"
+            << " workers=" << diagnostics_.size()
+            << " scans=" << total.scans
+            << " local_hits=" << total.local_hits
+            << " injected_hits=" << total.injected_hits
+            << " steal_hits=" << total.steal_hits
+            << " steal_misses=" << total.steal_misses
+            << " pending_retries=" << total.pending_retries
+            << " park_prepares=" << total.park_prepares
+            << " park_cancels=" << total.park_cancels
+            << " park_waits=" << total.park_waits
+            << " park_returns=" << total.park_returns
+            << " tasks=" << total.tasks_executed << '\n';
 }
 
 } // namespace modern::detail
