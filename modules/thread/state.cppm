@@ -44,7 +44,8 @@ public:
 // Internal factory: Chase-Lev strategy lives in a separate implementation TU.
 [[nodiscard]] std::unique_ptr<queue_strategy> make_chase_lev_queue_strategy(
   std::pmr::memory_resource* resource, std::size_t workers,
-  std::size_t max_pending_tasks);
+  std::size_t max_pending_tasks, thread_pool_state* owner,
+  bool recycle_nodes = false);
 
 inline thread_local thread_pool_state* current_thread_pool = nullptr;
 inline thread_local std::size_t current_worker_index = 0;

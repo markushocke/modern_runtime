@@ -25,6 +25,7 @@ enum class queue_backend
   direct_mutex,           // Original mutex-protected per-worker queues.
   injection_mutex_local,  // Per-worker producer inbox + mutex-local queue.
   injection_chase_lev,    // Bounded lock-free worker deques + MPMC ingress.
+  injection_chase_lev_pooled, // Same queues, bounded PMR task-node recycling.
 };
 
 // Wake policy is independent of the queue backend. The original per-task
