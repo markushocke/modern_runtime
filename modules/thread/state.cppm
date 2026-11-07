@@ -50,6 +50,8 @@ public:
 
 inline thread_local thread_pool_state* current_thread_pool = nullptr;
 inline thread_local std::size_t current_worker_index = 0;
+// Instrument only when explicitly enabled; remains null otherwise.
+inline thread_local std::uint64_t* current_steal_probe_counter = nullptr;
 
 struct worker_queue
 {
@@ -155,6 +157,7 @@ private:
     std::uint64_t injected_hits = 0;
     std::uint64_t steal_hits = 0;
     std::uint64_t steal_misses = 0;
+    std::uint64_t victim_probes = 0;
     std::uint64_t pending_retries = 0;
     std::uint64_t park_prepares = 0;
     std::uint64_t park_cancels = 0;
