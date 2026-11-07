@@ -148,6 +148,9 @@ target_link_libraries(lock_free_queue_primitives_test PRIVATE Threads::Threads)
 add_executable(worker_parking_primitives_test tests/worker_parking_primitives.cpp)
 set_target_properties(worker_parking_primitives_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 target_link_libraries(worker_parking_primitives_test PRIVATE Threads::Threads)
+add_executable(recycling_node_pool_primitives_test tests/recycling_node_pool_primitives.cpp)
+set_target_properties(recycling_node_pool_primitives_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+target_link_libraries(recycling_node_pool_primitives_test PRIVATE Threads::Threads)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -162,6 +165,9 @@ if(BUILD_TESTING)
   add_test(NAME worker_parking_primitives COMMAND worker_parking_primitives_test)
   set_tests_properties(worker_parking_primitives PROPERTIES
     TIMEOUT 45 LABELS "stress;pool;idlepark")
+  add_test(NAME recycling_node_pool_primitives COMMAND recycling_node_pool_primitives_test)
+  set_tests_properties(recycling_node_pool_primitives PROPERTIES
+    TIMEOUT 45 LABELS "stress;pool;recycling")
 endif()
 
 get_target_property(_modern_runtime_compile_options modern_runtime COMPILE_OPTIONS)
