@@ -19,7 +19,7 @@ git switch bench/framework-comparison
 bash benchmarks/framework_comparison/run.sh
 ```
 
-On Linux, the default run builds six `modern_runtime` scheduling variants
+On Linux with `COMPARE_ALLOCATORS=1`, the default run builds eight `modern_runtime` scheduling variants
 (`modern_runtime` with `direct_mutex`, `modern_injection` with
 `injection_mutex_local`, and `modern_chase_lev` with the opt-in bounded
 lock-free `injection_chase_lev`, plus `modern_chase_lev_park` using the
@@ -33,7 +33,7 @@ only if you intentionally want to benchmark an installed oneTBB release. The par
 existing CMake files and dependencies. Network access is required for the
 initial external checkout unless sources are already cached.
 
-Optional ninth adapter (after six Linux runtime variants, Taskflow and oneTBB):
+Optional eleventh adapter (after eight Linux runtime variants, Taskflow and oneTBB):
 
 ```sh
 COMPARE_STDEXEC=1 bash benchmarks/framework_comparison/run.sh
@@ -46,7 +46,7 @@ validation on the target Clang/CMake toolchain.
 
 ## Fast runtime-only comparison
 
-For a first smoke test or to focus exclusively on the six Linux runtime variants:
+For a first smoke test or to focus exclusively on the eight Linux runtime variants:
 
 ```sh
 COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
@@ -54,10 +54,37 @@ COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
 ```
 
 For a full paired runtime comparison, set `COMPARE_ONLY_RUNTIME=1` and
-`COMPARE_RUNS=20`. The default run tests eight candidates on Linux (six runtime variants
+`COMPARE_RUNS=20`. The default run tests ten candidates on Linux (eight runtime variants
 plus two competitor frameworks).
 The runtime-only mode also works without downloading/building competitor
 dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
+
+## Controlled PMR allocator experiment
+
+The benchmark has two new opt-in *unpooled* Chase-Lev + atomic parking
+variants: `modern_chase_lev_park_mimalloc` and
+`modern_chase_lev_park_snmalloc`. Both pass an explicit
+`std::pmr::memory_resource` to the thread pool, so queue/node allocations
+use the selected allocator without globally replacing `malloc` or C++
+`operator new`. Both libraries are fetched at pinned revisions. The direct
+baseline is `modern_chase_lev_park` using the default PMR allocator.
+Task-body and queue/wakeup logic are unchanged; the existing custom pooled
+variant is a separate control, not part of the allocator A/B.
+
+For a small isolated experiment:
+
+```sh
+COMPARE_ONLY_RUNTIME=1 COMPARE_ALLOCATORS=1 COMPARE_RUNS=20 \
+COMPARE_OPERATIONS=100000 COMPARE_WORKERS="4 6" \
+COMPARE_WORKLOADS="pool_worker_fanout pool_mixed_compute pool_staged_pipeline" \
+bash benchmarks/framework_comparison/run.sh
+```
+
+Set `COMPARE_ALLOCATORS=0` or `PROFILE_ALLOCATORS=0` to avoid fetching
+or building these extra variants. The report adds a dedicated paired section
+with throughput and p99 comparisons to default PMR. No performance benefit
+has been established yet; validate the new dependencies and targets with a
+full on-host build before interpreting results.
 
 ## Actual use cases and profiling
 
@@ -79,7 +106,7 @@ existing raw scheduling diagnostics:
 A full-framework test is the **default**; `COMPARE_ONLY_RUNTIME=1` intentionally
 excludes Taskflow/oneTBB and must not be described as a framework comparison.
 
-For a profile of all eight Linux candidates with symbolized optimized code:
+For a profile of all ten Linux candidates with symbolized optimized code:
 
 ```sh
 PROFILE_WORKERS=4 PROFILE_OPERATIONS=1000000 \

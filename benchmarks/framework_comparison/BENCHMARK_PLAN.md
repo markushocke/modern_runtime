@@ -1,11 +1,10 @@
 # CURRENT BENCHMARK PLAN — modern_runtime vs Taskflow and oneTBB
 
-Status: baseline benchmark completed (5040/5040 valid runs) and a 6-worker
-profile identified allocator calls and scheduler/stealing overhead. An
-**opt-in pooled-node Chase-Lev variant** has now been implemented, but
-its integrated C++23 build, production stress tests and benchmark speedup
-have NOT yet been verified. The isolated recycler passed ASan/UBSan and
-TSan in a 400k-cycle concurrent local test.
+Status: baseline framework benchmark completed (5040/5040 valid runs),
+followed by runtime-only A/B (1080/1080 valid runs). The custom node recycler
+regressed particularly on staged pipeline. Pinned mimalloc and snmalloc
+PMR backends have now been added to the **benchmark branch only**; their
+integrated C++23 build and performance have NOT yet been validated.
 Last reviewed: 2026-11-07.
 
 ## Purpose / decision
@@ -16,10 +15,10 @@ tail latency and memory costs are competitive, and where the unified task/
 coroutine/cancellation/timer/I/O surface creates an integration advantage.
 
 Always include Taskflow 4.1.0 and oneTBB 2022.3.0 in the main comparison:
-the default run.sh builds six modern_runtime scheduling variants on Linux AND both
-competitors. The fourth uses Chase-Lev queues with atomic idle worker parking;
-the fifth uses direct Linux futex idle parking; the sixth shares the atomic
-parking queues but recycles PMR task nodes. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
+the default run.sh builds eight modern_runtime scheduling variants on Linux AND both
+competitors when COMPARE_ALLOCATORS=1. Two new adapters use mimalloc and
+snmalloc via explicit PMR resources; both keep the same unpooled Chase-Lev
+queues and atomic idle parking as the default-PMR baseline. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
 stdexec is optional and is not strictly equivalent to raw enqueue.
 
 ## Benchmark layers
@@ -71,7 +70,7 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
    on P1 fanout, staged pipeline and mixed CPU at 4/6/8/12/16 workers.
 2. Run profile.sh separately: it builds an optimized library with frame
    pointers and DWARF debug symbols, runs perf stat counters and samples
-   CPU stacks with perf record. Default: all eight Linux candidates, P1 scenarios.
+   CPU stacks with perf record. Default: all ten Linux candidates, P1 scenarios (allocator comparison enabled).
 3. Read hotspots.md (top self-overhead and rough categories), the full
    *.perf.report.txt, stat.csv and *.perf.data call graphs.
 4. Verify which call chains create the samples; check PMR malloc/free and
@@ -82,10 +81,12 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
    and the unchanged
    Chase-Lev/semaphore baseline, Taskflow and oneTBB. Hypothesis: far fewer
    voluntary context switches than ~1 per task; verify on 4/6/16 workers.
-6. Measure `modern_chase_lev_park_pooled` against
-   `modern_chase_lev_park` with identical queues and parking. Validate
-   throughput, p99, CV, PMR retention and allocation failure. Keep the
-   original allocator and queue modes as controls.
+6. Compare `modern_chase_lev_park_mimalloc` and
+   `modern_chase_lev_park_snmalloc` with `modern_chase_lev_park`.
+   The allocator is the only intended change: no global malloc interception,
+   no changes to wakeup, queues, priorities or task body. Compare p99, CV,
+   paired throughput and perf allocation samples. Do not promote based only
+   on an unstable aggregate median.
 
 CAUTION: a sampled profile cannot prove contention or waiting causality
 alone; off-CPU tracing may be required. Recorded samples are not directly
@@ -123,12 +124,12 @@ Validation for task-node pooling and original idle-parking backend:
 
 ## Next concrete steps
 
-1. First compile the new pooled backend on the target Clang C++23 host.
-   Run `recycling_node_pool_primitives`, all `pool_pooled_*` cases and
-   ASan/UBSan/TSan. Retain the original Chase-Lev backend as control.
-2. Run paired throughput/p99 tests (fanout, mixed compute, pipeline at
-   4/6/12 workers, 20 repeats) for pooled vs unpooled idle parking.
-   Never claim a win unless valid runs and CV support it.
+1. Build the two pinned allocator adapters on the target Clang C++23 host
+   and run short validated smoke tests. Confirm successful dependency fetch,
+   no accidental global allocation overrides and correct task results.
+2. Run paired throughput/p99 tests for default PMR vs mimalloc vs snmalloc
+   at 4/6 workers with 20 repeats for fanout, mixed compute and pipeline.
+   Control CPU affinity and frequency; inspect CV before conclusions.
 3. Collect updated report.md, runs.csv, summary.csv, metadata.json and
    profiler hotspots.md/stat/perf reports if needed. Confirm fewer allocator
    calls with matched profiling, not only a higher median throughput.
