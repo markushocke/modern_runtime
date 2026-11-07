@@ -2,6 +2,7 @@ module;
 
 #include "../detail/lock_free_queues.hpp"
 #include "../detail/move_only_function_support.hpp"
+#include "../detail/recycling_node_pool.hpp"
 
 #include <algorithm>
 #include <array>
@@ -23,13 +24,8 @@ namespace
 // Stored task objects are immutable while queued. A pointer is claimed by one
 // successful deque/MPMC CAS; only that winner may move and destroy its task.
 // No thief dereferences a pointer unless its CAS has succeeded.
-struct task_node
-{
-  explicit task_node(move_only_function task) noexcept
-    : callable(std::move(task)) {}
-
-  move_only_function callable;
-};
+using task_node = recycling_task_node<move_only_function>;
+using pooled_nodes = recycling_node_pool<move_only_function>;
 
 using task_pointer = task_node*;
 
@@ -124,8 +120,10 @@ class chase_lev_queue_strategy final : public queue_strategy
 public:
   chase_lev_queue_strategy(
     std::pmr::memory_resource* resource, std::size_t workers,
-    std::size_t max_pending_tasks)
+    std::size_t max_pending_tasks, thread_pool_state* owner,
+    bool recycle_nodes)
     : resource_(resource),
+      owner_(owner),
       node_allocator_(resource),
       locals_(resource),
       // Per-worker local lanes are small and fixed. Overflow safely enters
@@ -133,6 +131,9 @@ public:
       local_capacity_(std::min<std::size_t>(max_pending_tasks, 1024)),
       injected_(max_pending_tasks, resource)
   {
+    if (recycle_nodes)
+      pooled_ = std::make_unique<pooled_nodes>(
+        resource_, workers, max_pending_tasks);
     locals_.reserve(workers);
     for (std::size_t i = 0; i < workers; ++i)
       locals_.push_back(std::make_unique<local_deques>(local_capacity_, resource));
@@ -157,8 +158,14 @@ public:
   void push(std::size_t target, bool from_worker, move_only_function task,
             scheduler_priority priority) override
   {
-    auto* node = node_allocator_.allocate(1);
-    std::construct_at(node, std::move(task));
+    task_node* node;
+    if (pooled_)
+      node = pooled_->acquire(std::move(task), worker_cache_index());
+    else
+    {
+      node = node_allocator_.allocate(1);
+      std::construct_at(node, std::move(task));
+    }
 
     if (from_worker && locals_[target]->try_push(node, priority))
       return;
@@ -227,15 +234,30 @@ private:
 
   void destroy_node(task_pointer node) noexcept
   {
-    std::destroy_at(node);
-    node_allocator_.deallocate(node, 1);
+    if (pooled_)
+      pooled_->recycle(node, worker_cache_index());
+    else
+    {
+      std::destroy_at(node);
+      node_allocator_.deallocate(node, 1);
+    }
+  }
+
+  [[nodiscard]] std::size_t worker_cache_index() const noexcept
+  {
+    // The per-worker cache has exactly one accessor thread. External
+    // producers, other pools and strategy destruction use the central list.
+    return current_thread_pool == owner_
+      ? current_worker_index : pooled_nodes::no_worker;
   }
 
   // PMR is preserved: pointer-ring buffers and callable nodes use the
   // caller-provided memory resource. The resource must be thread-safe when
   // concurrently used by multiple submitting/worker threads.
   std::pmr::memory_resource* resource_;
+  thread_pool_state* owner_;
   std::pmr::polymorphic_allocator<task_node> node_allocator_;
+  std::unique_ptr<pooled_nodes> pooled_;
   std::pmr::vector<std::unique_ptr<local_deques>> locals_;
   const std::size_t local_capacity_;
   injection_rings injected_;
@@ -244,9 +266,10 @@ private:
 
 std::unique_ptr<queue_strategy> make_chase_lev_queue_strategy(
   std::pmr::memory_resource* resource, std::size_t workers,
-  std::size_t max_pending_tasks)
+  std::size_t max_pending_tasks, thread_pool_state* owner,
+  bool recycle_nodes)
 {
   return std::make_unique<chase_lev_queue_strategy>(
-    resource, workers, max_pending_tasks);
+    resource, workers, max_pending_tasks, owner, recycle_nodes);
 }
 } // namespace modern::detail

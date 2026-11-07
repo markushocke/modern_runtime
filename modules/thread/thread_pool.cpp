@@ -181,8 +181,10 @@ void thread_pool_state::start(std::size_t thread_count)
       queues_ = std::make_unique<mutex_queue_strategy>(resource_, thread_count, true);
       break;
     case queue_backend::injection_chase_lev:
+    case queue_backend::injection_chase_lev_pooled:
       queues_ = make_chase_lev_queue_strategy(
-        resource_, thread_count, max_pending_tasks_);
+        resource_, thread_count, max_pending_tasks_, this,
+        backend_ == queue_backend::injection_chase_lev_pooled);
       break;
     default:
       throw std::invalid_argument("unknown queue_backend");
@@ -253,7 +255,8 @@ void thread_pool_state::execute(move_only_function task, scheduler_priority prio
   // particular inbox there only adds contention on next_queue_.
   const auto queue_index = from_worker
     ? current_worker_index
-    : backend_ == queue_backend::injection_chase_lev
+    : (backend_ == queue_backend::injection_chase_lev ||
+         backend_ == queue_backend::injection_chase_lev_pooled)
       ? 0
       : next_queue_.fetch_add(1, std::memory_order_relaxed) % queue_count;
 

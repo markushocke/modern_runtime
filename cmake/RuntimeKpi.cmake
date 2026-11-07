@@ -71,6 +71,37 @@ if(MODERN_RUNTIME_BUILD_KPI)
         endforeach()
       endforeach()
     endif()
+    # Pooled task nodes must survive exactly the same lifecycle, bounded
+    # capacity, cancellation, shutdown and allocator-failure scenarios.
+    foreach(_workers IN ITEMS 1 2 4 8 16)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit
+                                  exceptions lifecycle allocation_failure
+                                  cancellation_race idle_waves)
+        add_test(NAME pool_pooled_park_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev_pooled park)
+        set_tests_properties(pool_pooled_park_${_scenario}_${_workers}
+          PROPERTIES TIMEOUT 45 LABELS "stress;pool;recycling;idlepark")
+      endforeach()
+    endforeach()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      foreach(_workers IN ITEMS 1 4 16)
+        foreach(_scenario IN ITEMS local_fanout shutdown_race
+                                    allocation_failure idle_waves)
+          add_test(NAME pool_pooled_futex_${_scenario}_${_workers}
+            COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev_pooled futex)
+          set_tests_properties(pool_pooled_futex_${_scenario}_${_workers}
+            PROPERTIES TIMEOUT 45 LABELS "stress;pool;recycling;futex")
+        endforeach()
+      endforeach()
+    endif()
+    foreach(_workers IN ITEMS 1 4 16)
+      foreach(_scenario IN ITEMS local_fanout shutdown_race allocation_failure)
+        add_test(NAME pool_pooled_semaphore_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev_pooled semaphore)
+        set_tests_properties(pool_pooled_semaphore_${_scenario}_${_workers}
+          PROPERTIES TIMEOUT 45 LABELS "stress;pool;recycling")
+      endforeach()
+    endforeach()
     # Prove wakeup/queue independence on both existing mutex backends.
     foreach(_backend IN ITEMS direct injection)
       foreach(_workers IN ITEMS 1 4 16)
