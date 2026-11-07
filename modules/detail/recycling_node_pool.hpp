@@ -117,7 +117,8 @@ public:
   }
 
 private:
-  struct local_cache {
+  // Isolate independent worker-owned heads from neighbouring cache lines.
+  struct alignas(64) local_cache {
     node* head = nullptr;
     std::size_t count = 0;
   };
