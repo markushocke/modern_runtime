@@ -89,6 +89,8 @@ def main():
                     counts = {field: int(values[field]) for field in FIELDS}
                     expected_tasks = operations * (3 if workload == "pool_staged_pipeline" else 1)
                     expected_tasks += 256  # warmup executes before measurement
+                    if workload == "pool_worker_fanout":
+                        expected_tasks += 1  # root task creates the leaves
                     if counts["tasks"] != expected_tasks:
                         raise RuntimeError(
                             f"Task mismatch {name}/{workload}: "
