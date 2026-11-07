@@ -1,9 +1,12 @@
 # CURRENT BENCHMARK PLAN — modern_runtime vs Taskflow and oneTBB
 
-Status: benchmarking infrastructure and three initial representative use-case workloads committed.
-**Full integration build, sanitizers, and fresh on-host results have NOT been
-verified for these changes. Do not publish a ranking until those checks pass.**
-Last reviewed: 2026-11-06.
+Status: baseline benchmark completed (5040/5040 valid runs) and a 6-worker
+profile identified allocator calls and scheduler/stealing overhead. An
+**opt-in pooled-node Chase-Lev variant** has now been implemented, but
+its integrated C++23 build, production stress tests and benchmark speedup
+have NOT yet been verified. The isolated recycler passed ASan/UBSan and
+TSan in a 400k-cycle concurrent local test.
+Last reviewed: 2026-11-07.
 
 ## Purpose / decision
 
@@ -13,9 +16,10 @@ tail latency and memory costs are competitive, and where the unified task/
 coroutine/cancellation/timer/I/O surface creates an integration advantage.
 
 Always include Taskflow 4.1.0 and oneTBB 2022.3.0 in the main comparison:
-the default run.sh builds five modern_runtime scheduling variants on Linux AND both
-competitors. The fourth uses Chase-Lev queues with atomic idle worker parking; the
-fifth uses direct Linux futex idle parking on the same Chase-Lev queues. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
+the default run.sh builds six modern_runtime scheduling variants on Linux AND both
+competitors. The fourth uses Chase-Lev queues with atomic idle worker parking;
+the fifth uses direct Linux futex idle parking; the sixth shares the atomic
+parking queues but recycles PMR task nodes. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
 stdexec is optional and is not strictly equivalent to raw enqueue.
 
 ## Benchmark layers
@@ -67,7 +71,7 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
    on P1 fanout, staged pipeline and mixed CPU at 4/6/8/12/16 workers.
 2. Run profile.sh separately: it builds an optimized library with frame
    pointers and DWARF debug symbols, runs perf stat counters and samples
-   CPU stacks with perf record. Default: all seven Linux candidates, P1 scenarios.
+   CPU stacks with perf record. Default: all eight Linux candidates, P1 scenarios.
 3. Read hotspots.md (top self-overhead and rough categories), the full
    *.perf.report.txt, stat.csv and *.perf.data call graphs.
 4. Verify which call chains create the samples; check PMR malloc/free and
@@ -78,8 +82,10 @@ end-to-end completion latency; other workloads use enqueue-to-start latency.
    and the unchanged
    Chase-Lev/semaphore baseline, Taskflow and oneTBB. Hypothesis: far fewer
    voluntary context switches than ~1 per task; verify on 4/6/16 workers.
-6. Optimize the next measured hotspot on dev, retain older variants as
-   comparators, then rerun acceptance and the full matrix.
+6. Measure `modern_chase_lev_park_pooled` against
+   `modern_chase_lev_park` with identical queues and parking. Validate
+   throughput, p99, CV, PMR retention and allocation failure. Keep the
+   original allocator and queue modes as controls.
 
 CAUTION: a sampled profile cannot prove contention or waiting causality
 alone; off-CPU tracing may be required. Recorded samples are not directly
@@ -109,23 +115,25 @@ Profiling (independent, instrumented and symbolized build):
 Optional: choose PROFILE_TASKSET and COMPARE_TASKSET based on
 lscpu -e=CPU,CORE,SOCKET, not an assumed numbering scheme.
 
-Validation for the new idle-parking policy and original lock-free backend:
+Validation for task-node pooling and original idle-parking backend:
 
     cmake --preset kpi && cmake --build --preset kpi -j8
-    ctest --test-dir build/kpi -R 'worker_parking_primitives|pool_park_|lock_free_queue_primitives|pool_chase_lev_' \
+    ctest --test-dir build/kpi -R 'recycling_node_pool_primitives|pool_pooled_|worker_parking_primitives|pool_park_|lock_free_queue_primitives|pool_chase_lev_' \
       --output-on-failure
 
 ## Next concrete steps
 
-1. On-host C++23 module build, stress and sanitizer acceptance of idle parking and direct futex mode,
-   including `worker_parking_primitives`, `pool_park_chase_lev_*` and
-   `pool_futex_chase_lev_*`,
-   and repeated idle-wakeup cycles. Do not claim success until measured.
-2. Collect full competitor results and matching perf profiles. Upload report.md,
-   runs.csv, summary.csv, metadata.json AND profiler hotspots.md/stat/perf reports.
-3. Attribute the measured bottleneck before choosing PMR/node-pool, wakeup,
-   queue or task API optimization.
-4. Implement bulk_parallel_for and a native dependency_dag comparison
+1. First compile the new pooled backend on the target Clang C++23 host.
+   Run `recycling_node_pool_primitives`, all `pool_pooled_*` cases and
+   ASan/UBSan/TSan. Retain the original Chase-Lev backend as control.
+2. Run paired throughput/p99 tests (fanout, mixed compute, pipeline at
+   4/6/12 workers, 20 repeats) for pooled vs unpooled idle parking.
+   Never claim a win unless valid runs and CV support it.
+3. Collect updated report.md, runs.csv, summary.csv, metadata.json and
+   profiler hotspots.md/stat/perf reports if needed. Confirm fewer allocator
+   calls with matched profiling, not only a higher median throughput.
+4. After pool acceptance, address unsuccessful steals and queue scans.
+5. Implement bulk_parallel_for and a native dependency_dag comparison
    (Taskflow graph, oneTBB flow graph and equivalent modern_runtime
    dependencies), and measure true bounded backpressure; separately assess
    modern-only composition, cancellation, timer and I/O capabilities.

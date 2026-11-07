@@ -19,19 +19,21 @@ git switch bench/framework-comparison
 bash benchmarks/framework_comparison/run.sh
 ```
 
-On Linux, the default run builds five `modern_runtime` scheduling variants
+On Linux, the default run builds six `modern_runtime` scheduling variants
 (`modern_runtime` with `direct_mutex`, `modern_injection` with
 `injection_mutex_local`, and `modern_chase_lev` with the opt-in bounded
 lock-free `injection_chase_lev`, plus `modern_chase_lev_park` using the
 same Chase-Lev queues with idle-only worker parking, plus
-`modern_chase_lev_futex` with direct Linux futex sleeping), **Taskflow 4.1.0** and
+`modern_chase_lev_futex` with direct Linux futex sleeping, plus
+`modern_chase_lev_park_pooled` with bounded PMR task-node recycling),
+**Taskflow 4.1.0** and
 **oneTBB 2022.3.0**. Both competitors are fetched from pinned Git revisions
 by default. Set `-DCOMPARE_USE_SYSTEM_TBB=ON` during manual CMake configuration
 only if you intentionally want to benchmark an installed oneTBB release. The parent runtime is built using its
 existing CMake files and dependencies. Network access is required for the
 initial external checkout unless sources are already cached.
 
-Optional eighth adapter (after five Linux runtime variants, Taskflow and oneTBB):
+Optional ninth adapter (after six Linux runtime variants, Taskflow and oneTBB):
 
 ```sh
 COMPARE_STDEXEC=1 bash benchmarks/framework_comparison/run.sh
@@ -44,7 +46,7 @@ validation on the target Clang/CMake toolchain.
 
 ## Fast runtime-only comparison
 
-For a first smoke test or to focus exclusively on the five Linux runtime variants:
+For a first smoke test or to focus exclusively on the six Linux runtime variants:
 
 ```sh
 COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
@@ -52,7 +54,7 @@ COMPARE_ONLY_RUNTIME=1 COMPARE_RUNS=1 COMPARE_OPERATIONS=1000 \
 ```
 
 For a full paired runtime comparison, set `COMPARE_ONLY_RUNTIME=1` and
-`COMPARE_RUNS=20`. The default run tests seven candidates on Linux (five runtime variants
+`COMPARE_RUNS=20`. The default run tests eight candidates on Linux (six runtime variants
 plus two competitor frameworks).
 The runtime-only mode also works without downloading/building competitor
 dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
@@ -77,7 +79,7 @@ existing raw scheduling diagnostics:
 A full-framework test is the **default**; `COMPARE_ONLY_RUNTIME=1` intentionally
 excludes Taskflow/oneTBB and must not be described as a framework comparison.
 
-For a profile of all seven Linux candidates with symbolized optimized code:
+For a profile of all eight Linux candidates with symbolized optimized code:
 
 ```sh
 PROFILE_WORKERS=4 PROFILE_OPERATIONS=1000000 \
@@ -161,6 +163,14 @@ library API level; the benchmark constructs both explicitly.
 `modern_runtime` remains the direct-mutex reference, so same-round paired
 ratios show whether injection or Chase-Lev wins or loses.
 
+`modern_chase_lev_park_pooled` differs from `modern_chase_lev_park`
+only in task-node allocation. A bounded PMR recycler (16 cached nodes per
+worker, up to 4096 centrally cached) reuses empty nodes; each worker owns
+its local cache, external producers use a mutex-protected central freelist.
+The A/B report includes a dedicated throughput and p99 comparison.
+The pooled variant is experimental until full on-host C++23 module builds,
+stress/sanitizer matrices, and representative benchmark results pass.
+
 `modern_chase_lev_futex` is a Linux-only alternative to the atomic-wait
 parking mode. It uses per-worker FUTEX_WAIT_PRIVATE / FUTEX_WAKE_PRIVATE
 with a 32-bit epoch, avoiding libstdc++ atomic-wait spinning. The baseline
@@ -214,8 +224,9 @@ SHA from `metadata.json` or `git merge-base dev bench/framework-comparison`.
 
 ## Current limitations
 
-The benchmark adapters have been committed but have not yet been built/tested
-on the target host. The C++23 module toolchain, `modern_trace` dependency and
+The existing adapters have previously been built and benchmarked on the
+target host; the newly added pooled-node variant has **not** been validated
+in a full integrated on-host C++23 build yet. The C++23 module toolchain, `modern_trace` dependency and
 external source checkout must be available. stdexec is opt-in and not a direct
 fire-and-forget scheduling equivalence. Task graphs, continuation chains,
 bulk algorithms and memory-allocation counts are **not** part of this first
