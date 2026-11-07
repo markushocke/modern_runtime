@@ -47,6 +47,14 @@ modern::thread_pool futex_pool{modern::thread_pool_options{
   .wakeup = modern::worker_wakeup::idle_parking_futex
 }};
 
+// Opt-in bounded node recycling with the same queues and atomic parking.
+modern::thread_pool pooled{modern::thread_pool_options{
+  .workers = 8,
+  .max_pending_tasks = 4096,
+  .backend = modern::queue_backend::injection_chase_lev_pooled,
+  .wakeup = modern::worker_wakeup::idle_parking
+}};
+
 // Make the original backend explicit for A/B comparisons.
 modern::thread_pool classic{modern::thread_pool_options{
   .workers = 8,
@@ -97,6 +105,26 @@ public `scheduler` and `submit` APIs do not change.
   and PMR deques. All backends preserve priority lanes, the current
   pool-level queue capacity, shutdown/drain and exception rollback semantics.
   Priorities are local best-effort, not strict global ordering.
+
+## Optional PMR task-node recycling
+
+`injection_chase_lev_pooled` uses the same bounded Chase-Lev local queues,
+priority lanes, global MPMC injection ring and pending-task limit as
+`injection_chase_lev`. Only task-node allocation changes: instead of
+allocating/freeing the PMR task node on each push/pop, a PMR-backed recycler
+retains up to 16 empty nodes per worker (exclusive owner access) and up to
+4096 empty nodes in a central mutex-protected freelist, additionally limited
+by the configured max_pending capacity. Cross-worker freeing is safe: each
+worker retires nodes into **its own** cache and spills extras centrally.
+External producers use the central list. Recycled nodes release their old
+captured callable before caching. Remaining nodes are deallocated through the
+same PMR resource after all worker threads have joined.
+
+The central freelist deliberately uses a mutex to avoid ABA/unsafe memory
+reclamation in a lock-free stack. There are **no correctness or speedup claims**
+until full Clang C++23 modules, stress/sanitizer and repeated A/B benchmarks
+pass. The default queue backend and all existing callers stay unchanged.
+The recycler can be paired with semaphore, atomic parking or Linux futex.
 
 ## Wakeup policy (independent of the queue backend)
 
@@ -172,6 +200,14 @@ Queue priorities are enforced within each local deque or inbox; this is not
 a strict global priority ordering across different worker queues.
 
 ## Test / acceptance
+
+`recycling_node_pool_primitives` independently exercises reuse, PMR allocation
+failure, cross-thread retirement, bounded retention and complete destruction.
+`pool_pooled_park_*` repeats nine production scenarios for 1/2/4/8/16
+workers, with additional pooled-futex and pooled-semaphore compatibility
+matrices. The direct benchmark pair is
+`modern_chase_lev_park_pooled` vs `modern_chase_lev_park`.
+
 
 ```sh
 cmake --preset kpi
