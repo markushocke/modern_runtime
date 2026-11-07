@@ -93,6 +93,12 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
   std::size_t next_victim = worker_index + 1;
   std::size_t empty_scans = 0;
   diagnostic_counts* counts = diagnostic_enabled_ ? &diagnostics_[worker_index] : nullptr;
+  // Scoped by this worker loop: the worker_context destructor clears the
+  // pool identity; clear the optional instrumentation pointer on exit.
+  struct probe_scope {
+    ~probe_scope() { current_steal_probe_counter = nullptr; }
+  } probes;
+  current_steal_probe_counter = counts ? &counts->victim_probes : nullptr;
 
   auto idle_retry = [&]() noexcept
   {

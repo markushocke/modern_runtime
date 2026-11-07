@@ -204,6 +204,7 @@ public:
       const auto victim = (first + offset) % count;
       if (victim == worker)
         continue;
+      if (current_steal_probe_counter) ++*current_steal_probe_counter;
       if (auto* node = locals_[victim]->steal())
       {
         next_victim = (victim + 1) % count;

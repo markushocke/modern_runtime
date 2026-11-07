@@ -329,6 +329,7 @@ void thread_pool_state::print_worker_diagnostics() const
     total.injected_hits += item.injected_hits;
     total.steal_hits += item.steal_hits;
     total.steal_misses += item.steal_misses;
+    total.victim_probes += item.victim_probes;
     total.pending_retries += item.pending_retries;
     total.park_prepares += item.park_prepares;
     total.park_cancels += item.park_cancels;
@@ -343,6 +344,7 @@ void thread_pool_state::print_worker_diagnostics() const
             << " injected_hits=" << total.injected_hits
             << " steal_hits=" << total.steal_hits
             << " steal_misses=" << total.steal_misses
+            << " victim_probes=" << total.victim_probes
             << " pending_retries=" << total.pending_retries
             << " park_prepares=" << total.park_prepares
             << " park_cancels=" << total.park_cancels
