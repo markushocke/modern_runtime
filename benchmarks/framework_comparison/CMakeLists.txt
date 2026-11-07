@@ -12,6 +12,7 @@ option(COMPARE_WITH_ONETBB "Build the oneTBB adapter" ON)
 option(COMPARE_WITH_STDEXEC "Build the stdexec sender/receiver adapter" OFF)
 option(COMPARE_FETCH_DEPS "Download pinned competitor sources" ON)
 option(COMPARE_USE_SYSTEM_TBB "Use installed oneTBB instead of the pinned revision" OFF)
+option(COMPARE_WITH_ALLOCATORS "Build mimalloc and snmalloc PMR benchmark variants" ON)
 
 # Build the runtime unmodified as a dependency of these tests.
 set(MODERN_RUNTIME_BUILD_KPI OFF CACHE BOOL "" FORCE)
@@ -29,6 +30,40 @@ compare_executable(compare_modern_injection MODERN_INJECTION)
 compare_executable(compare_modern_chase_lev MODERN_CHASE_LEV)
 compare_executable(compare_modern_chase_lev_park MODERN_PARK)
 compare_executable(compare_modern_chase_lev_park_pooled MODERN_PARK_POOLED)
+
+if(COMPARE_WITH_ALLOCATORS)
+  if(NOT COMPARE_FETCH_DEPS)
+    message(FATAL_ERROR "Allocator adapters require COMPARE_FETCH_DEPS=ON")
+  endif()
+  # Explicit PMR resources only: no LD_PRELOAD, global malloc override,
+  # or linking to mimalloc's C++ operator-new replacement.
+  set(MI_OVERRIDE OFF CACHE BOOL "" FORCE)
+  set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+  set(MI_BUILD_STATIC ON CACHE BOOL "" FORCE)
+  set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+  set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(compare_mimalloc
+    GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
+    GIT_TAG c683b7c60c91cb2809977e37d3f4d084d7497180
+    GIT_SHALLOW FALSE)
+  FetchContent_MakeAvailable(compare_mimalloc)
+
+  set(SNMALLOC_HEADER_ONLY_LIBRARY ON CACHE BOOL "" FORCE)
+  set(SNMALLOC_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(compare_snmalloc
+    GIT_REPOSITORY https://github.com/microsoft/snmalloc.git
+    GIT_TAG 48997b556044756940e9ccc283b8f1f412cfbbd5
+    GIT_SHALLOW FALSE)
+  FetchContent_MakeAvailable(compare_snmalloc)
+
+  compare_executable(compare_modern_chase_lev_park_mimalloc MODERN_PARK_MIMALLOC)
+  compare_executable(compare_modern_chase_lev_park_snmalloc MODERN_PARK_SNMALLOC)
+  target_link_libraries(compare_modern_chase_lev_park_mimalloc PRIVATE modern_runtime mimalloc-static)
+  target_link_libraries(compare_modern_chase_lev_park_snmalloc PRIVATE modern_runtime snmalloc)
+  set_property(TARGET compare_modern_chase_lev_park_mimalloc PROPERTY CXX_SCAN_FOR_MODULES ON)
+  set_property(TARGET compare_modern_chase_lev_park_snmalloc PROPERTY CXX_SCAN_FOR_MODULES ON)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   compare_executable(compare_modern_chase_lev_futex MODERN_FUTEX)
 endif()

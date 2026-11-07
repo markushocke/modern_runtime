@@ -12,6 +12,7 @@ cd "$repo_root"
 : "${COMPARE_WORKLOADS:=pool_worker_fanout pool_mixed_compute pool_staged_pipeline pool_dispatch pool_multi_producer pool_single_flight}"
 : "${COMPARE_STDEXEC:=0}"
 : "${COMPARE_ONLY_RUNTIME:=0}"
+: "${COMPARE_ALLOCATORS:=1}"
 : "${COMPARE_OUTPUT:=build/framework-comparison/results-$(date -u +%Y%m%dT%H%M%SZ)}"
 : "${COMPARE_BUILD_DIR:=build/framework-comparison/cmake}"
 
@@ -40,9 +41,13 @@ cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_TASKFLOW="$compare_external" \
   -DCOMPARE_WITH_ONETBB="$compare_external" \
   -DCOMPARE_WITH_STDEXEC="$COMPARE_STDEXEC" \
+  -DCOMPARE_WITH_ALLOCATORS="$([[ "$COMPARE_ALLOCATORS" == "1" ]] && echo ON || echo OFF)" \
   -DCOMPARE_FETCH_DEPS=ON
 
 targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
+if [[ "$COMPARE_ALLOCATORS" == "1" ]]; then
+  targets+=(compare_modern_chase_lev_park_mimalloc compare_modern_chase_lev_park_snmalloc)
+fi
 if [[ "$(uname -s)" == "Linux" ]]; then
   targets+=(compare_modern_chase_lev_futex)
 fi
@@ -63,6 +68,10 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --binary "modern_chase_lev=$COMPARE_BUILD_DIR/compare_modern_chase_lev" \
       --binary "modern_chase_lev_park=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park" \
       --binary "modern_chase_lev_park_pooled=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_pooled")
+if [[ "$COMPARE_ALLOCATORS" == "1" ]]; then
+  args+=(--binary "modern_chase_lev_park_mimalloc=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_mimalloc"
+        --binary "modern_chase_lev_park_snmalloc=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_snmalloc")
+fi
 if [[ "$(uname -s)" == "Linux" ]]; then
   args+=(--binary "modern_chase_lev_futex=$COMPARE_BUILD_DIR/compare_modern_chase_lev_futex")
 fi

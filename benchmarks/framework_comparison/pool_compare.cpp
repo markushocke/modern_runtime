@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED) || defined(COMPARE_MODERN_PARK_MIMALLOC) || defined(COMPARE_MODERN_PARK_SNMALLOC)
 import modern.runtime;
 #endif
 
@@ -13,12 +13,21 @@ import modern.runtime;
 #include <iomanip>
 #include <iostream>
 #include <latch>
+#include <memory_resource>
+#include <new>
+#include <limits>
 #include <semaphore>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#if defined(COMPARE_MODERN_PARK_MIMALLOC)
+#include <mimalloc.h>
+#elif defined(COMPARE_MODERN_PARK_SNMALLOC)
+#include <snmalloc/snmalloc.h>
+#endif
 
 #if defined(COMPARE_TASKFLOW)
 #include <taskflow/taskflow.hpp>
@@ -78,8 +87,12 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED)
-#if defined(COMPARE_MODERN_PARK_POOLED)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED) || defined(COMPARE_MODERN_PARK_MIMALLOC) || defined(COMPARE_MODERN_PARK_SNMALLOC)
+#if defined(COMPARE_MODERN_PARK_MIMALLOC)
+constexpr char framework[] = "modern_chase_lev_park_mimalloc";
+#elif defined(COMPARE_MODERN_PARK_SNMALLOC)
+constexpr char framework[] = "modern_chase_lev_park_snmalloc";
+#elif defined(COMPARE_MODERN_PARK_POOLED)
 constexpr char framework[] = "modern_chase_lev_park_pooled";
 #elif defined(COMPARE_MODERN_FUTEX)
 constexpr char framework[] = "modern_chase_lev_futex";
@@ -92,10 +105,52 @@ constexpr char framework[] = "modern_injection";
 #else
 constexpr char framework[] = "modern_runtime";
 #endif
+#if defined(COMPARE_MODERN_PARK_MIMALLOC) || defined(COMPARE_MODERN_PARK_SNMALLOC)
+class external_allocator_resource final : public std::pmr::memory_resource {
+  void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+    if (bytes == 0) bytes = 1;
+#if defined(COMPARE_MODERN_PARK_MIMALLOC)
+    void* result = mi_malloc_aligned(bytes, alignment);
+#else
+    void* result = snmalloc::alloc_aligned(alignment, bytes);
+#endif
+    if (!result) throw std::bad_alloc{};
+    return result;
+  }
+  void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override {
+#if defined(COMPARE_MODERN_PARK_MIMALLOC)
+    (void)bytes;
+    (void)alignment;
+    mi_free(ptr);
+#else
+    snmalloc::dealloc(ptr, bytes == 0 ? 1 : bytes, alignment);
+#endif
+  }
+  bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    return this == &other;
+  }
+};
+std::pmr::memory_resource* selected_resource() {
+  static external_allocator_resource resource;
+  return &resource;
+}
+#else
+std::pmr::memory_resource* selected_resource() {
+  return nullptr; // existing default PMR, unchanged for baseline runs
+}
+#endif
 class scheduler {
  public:
   scheduler(std::size_t workers, std::size_t ops)
-#if defined(COMPARE_MODERN_PARK_POOLED)
+#if defined(COMPARE_MODERN_PARK_MIMALLOC) || defined(COMPARE_MODERN_PARK_SNMALLOC)
+    : pool_(modern::thread_pool_options{
+        .workers = workers,
+        .resource = selected_resource(),
+        .max_pending_tasks = ops + workers + 128,
+        .backend = modern::queue_backend::injection_chase_lev,
+        .wakeup = modern::worker_wakeup::idle_parking
+      }) {}
+#elif defined(COMPARE_MODERN_PARK_POOLED)
     : pool_(modern::thread_pool_options{
         .workers = workers,
         .resource = nullptr,

@@ -11,6 +11,7 @@ cd "$(git rev-parse --show-toplevel)"
 : "${PROFILE_OPERATIONS:=1000000}"
 : "${PROFILE_WORKLOADS:=pool_worker_fanout pool_mixed_compute pool_staged_pipeline}"
 : "${PROFILE_INCLUDE_COMPETITORS:=1}"
+: "${PROFILE_ALLOCATORS:=1}"
 : "${PROFILE_BUILD_JOBS:=8}"
 : "${PROFILE_FREQUENCY:=499}"
 : "${PROFILE_SAMPLE_EVENT:=cycles:u}"
@@ -42,10 +43,15 @@ cmake -S benchmarks/framework_comparison -B "$PROFILE_BUILD_DIR" -G Ninja \
   -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -g -fno-omit-frame-pointer" \
   -DCOMPARE_WITH_TASKFLOW="$compare_external" \
   -DCOMPARE_WITH_ONETBB="$compare_external" \
-  -DCOMPARE_WITH_STDEXEC=OFF
+  -DCOMPARE_WITH_STDEXEC=OFF \
+  -DCOMPARE_WITH_ALLOCATORS="$([[ "$PROFILE_ALLOCATORS" == "1" ]] && echo ON || echo OFF)"
 
 names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park modern_chase_lev_park_pooled)
 targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
+if [[ "$PROFILE_ALLOCATORS" == "1" ]]; then
+  names+=(modern_chase_lev_park_mimalloc modern_chase_lev_park_snmalloc)
+  targets+=(compare_modern_chase_lev_park_mimalloc compare_modern_chase_lev_park_snmalloc)
+fi
 if [[ "$(uname -s)" == "Linux" ]]; then
   names+=(modern_chase_lev_futex)
   targets+=(compare_modern_chase_lev_futex)

@@ -203,6 +203,47 @@ def main(folder):
                    f"{ratio} | {wins} | {p99ratio} |")
     out.extend(["", "Measured speedups require complete correctness and stability validation.", ""])
 
+    # Compare only PMR source; all candidates use unpooled Chase-Lev,
+    # identical atomic idle parking and identical task bodies.
+    out.extend([
+        "## PMR allocator A/B: default vs mimalloc vs snmalloc",
+        "",
+        "All three use identical unpooled Chase-Lev queues and atomic parking.",
+        "Paired ratio above 1.0x: external allocator increases throughput.",
+        "",
+        "| Workload | Workers | Allocator | Pairs | Throughput vs default PMR | "
+        "Wins | p99 vs default PMR |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: |",
+    ])
+    for workload, workers in configs:
+        for name, alias in [
+            ("modern_chase_lev_park_mimalloc", "mimalloc"),
+            ("modern_chase_lev_park_snmalloc", "snmalloc"),
+        ]:
+            speeds, tails = [], []
+            for repeat in sorted({row["run"] for row in rows
+                                  if row["workload"] == workload
+                                  and int(row["workers"]) == workers}):
+                alt = by_run.get((workload, workers, repeat, name))
+                default = by_run.get((workload, workers, repeat, "modern_chase_lev_park"))
+                if not alt or not default or any(
+                    r["valid"] != "1" or r["returncode"] != "0"
+                    for r in (alt, default)
+                ):
+                    continue
+                base_speed = float(default["ops_per_second"])
+                base_p99 = float(default["p99_ns"])
+                if base_speed > 0:
+                    speeds.append(float(alt["ops_per_second"]) / base_speed)
+                if base_p99 > 0:
+                    tails.append(float(alt["p99_ns"]) / base_p99)
+            ratio = f"{statistics.median(speeds):.2f}x" if speeds else "n/a"
+            wins = f"{sum(x > 1 for x in speeds)}/{len(speeds)}" if speeds else "n/a"
+            tail = f"{statistics.median(tails):.2f}x" if tails else "n/a"
+            out.append(f"| {workload} | {workers} | {alias} | {len(speeds)} | "
+                       f"{ratio} | {wins} | {tail} |")
+    out.extend(["", "The old pooled-node variant is NOT part of this controlled allocator A/B.", ""])
+
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([
