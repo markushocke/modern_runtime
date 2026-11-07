@@ -86,6 +86,39 @@ with throughput and p99 comparisons to default PMR. No performance benefit
 has been established yet; validate the new dependencies and targets with a
 full on-host build before interpreting results.
 
+## Worker-loop diagnostics (opt-in)
+
+The runtime diagnostic counters are **disabled** unless
+\`MODERN_RUNTIME_WORKER_DIAGNOSTICS=1\` is set. On worker join the runtime
+prints one key-value summary to stderr. Counters include successful local
+and injection pops, successful and unsuccessful steal scans, **individual
+Chase-Lev victim probes**, accepted-but-unclaimed busy retries, parking
+registrations, cancellations, sleeps/returns and executed task calls.
+The counters are owned by individual workers and aggregated after join.
+
+To build only the required adapters and collect a compact reproducible CSV:
+
+\`\`\`sh
+git switch bench/framework-comparison
+cmake -S benchmarks/framework_comparison -B build/framework-comparison/cmake -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCOMPARE_WITH_TASKFLOW=OFF \
+  -DCOMPARE_WITH_ONETBB=OFF -DCOMPARE_WITH_ALLOCATORS=OFF
+cmake --build build/framework-comparison/cmake -j8 \
+  --target compare_modern_chase_lev_park \
+           compare_modern_chase_lev_futex \
+           compare_modern_chase_lev_park_pooled
+WORKER_DIAG_WORKERS=6 WORKER_DIAG_OPERATIONS=100000 \
+  python3 benchmarks/framework_comparison/diagnose_workers.py
+\`\`\`
+
+Inspect \`build/framework-comparison/worker-diagnostics.csv\`, especially
+\`victim_probes_per_task\`, \`steal_miss_per_task\`,
+\`pending_retries_per_task\` and \`park_waits_per_task\`.
+This is **not** a throughput benchmark: diagnostic counter branches affect
+the hot path and all three binaries run separately. For throughput and p99,
+run \`run.sh\` with diagnostics unset. Per-worker cacheline-separated
+counters avoid a shared counter mutex.
+
 ## Actual use cases and profiling
 
 The suite now includes three P1 use-case scenarios in addition to the three
