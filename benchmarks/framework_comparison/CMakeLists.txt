@@ -42,7 +42,6 @@ if(COMPARE_WITH_ALLOCATORS)
   set(MI_BUILD_STATIC ON CACHE BOOL "" FORCE)
   set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
   set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(compare_mimalloc
     GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
     GIT_TAG c683b7c60c91cb2809977e37d3f4d084d7497180
