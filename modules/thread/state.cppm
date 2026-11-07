@@ -8,6 +8,7 @@ module;
 #include "../detail/task_semaphore.hpp"
 #include "../detail/worker_parking.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -144,6 +145,23 @@ private:
 
   void worker_loop(std::size_t worker_index, std::stop_token stop_token);
   void worker_loop_idle_parking(std::size_t worker_index);
+  void print_worker_diagnostics() const;
+
+  // Writes are worker-owned; the main thread reads only after join.
+  struct alignas(64) diagnostic_counts
+  {
+    std::uint64_t scans = 0;
+    std::uint64_t local_hits = 0;
+    std::uint64_t injected_hits = 0;
+    std::uint64_t steal_hits = 0;
+    std::uint64_t steal_misses = 0;
+    std::uint64_t pending_retries = 0;
+    std::uint64_t park_prepares = 0;
+    std::uint64_t park_cancels = 0;
+    std::uint64_t park_waits = 0;
+    std::uint64_t park_returns = 0;
+    std::uint64_t tasks_executed = 0;
+  };
 
   std::pmr::memory_resource* resource_;
   std::size_t max_pending_tasks_;
@@ -156,6 +174,10 @@ private:
   // Initialized before any worker starts if idle parking is enabled.
   std::unique_ptr<worker_parking> parking_;
   std::unique_ptr<queue_strategy> queues_;
+  bool diagnostic_enabled_ = false;
+  bool diagnostics_printed_ = false;
+  std::pmr::vector<diagnostic_counts> diagnostics_;
+
   std::pmr::vector<std::jthread> workers_;
   std::pmr::vector<std::size_t> worker_affinity_;
 };

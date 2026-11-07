@@ -92,6 +92,7 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
 {
   std::size_t next_victim = worker_index + 1;
   std::size_t empty_scans = 0;
+  diagnostic_counts* counts = diagnostic_enabled_ ? &diagnostics_[worker_index] : nullptr;
 
   auto idle_retry = [&]() noexcept
   {
@@ -110,12 +111,23 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
 
   auto find_task = [&]() -> move_only_function
   {
+    if (counts) ++counts->scans;
     if (auto task = queues_->pop_local(worker_index))
+    {
+      if (counts) ++counts->local_hits;
       return task;
+    }
     if (auto task = queues_->pop_injected(worker_index))
+    {
+      if (counts) ++counts->injected_hits;
       return task;
+    }
     if (auto task = queues_->steal_local(worker_index, next_victim))
+    {
+      if (counts) ++counts->steal_hits;
       return task;
+    }
+    if (counts) ++counts->steal_misses;
     return queues_->steal_injected(worker_index, next_victim);
   };
 
@@ -125,6 +137,7 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     {
       empty_scans = 0;
       finish_pending_slot();
+      if (counts) ++counts->tasks_executed;
       task();
       continue;
     }
@@ -138,18 +151,22 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     // remains unclaimed, otherwise the entire pool might sleep on work.
     if ((state & pending_mask) != 0)
     {
+      if (counts) ++counts->pending_retries;
       idle_retry();
       continue;
     }
 
     empty_scans = 0;
+    if (counts) ++counts->park_prepares;
     const auto epoch = parking_->prepare(worker_index);
     // Recheck AFTER becoming visible to notifiers. A producer that
     // published before registration cannot cause a lost wakeup.
     if (auto task = find_task())
     {
+      if (counts) ++counts->park_cancels;
       parking_->cancel(worker_index);
       finish_pending_slot();
+      if (counts) ++counts->tasks_executed;
       task();
       continue;
     }
@@ -160,18 +177,22 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     state = work_state_.load(std::memory_order_seq_cst);
     if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
     {
+      if (counts) ++counts->park_cancels;
       parking_->cancel(worker_index);
       return;
     }
 
     if ((state & pending_mask) != 0)
     {
+      if (counts) { ++counts->park_cancels; ++counts->pending_retries; }
       parking_->cancel(worker_index);
       idle_retry();
       continue;
     }
 
+    if (counts) ++counts->park_waits;
     parking_->wait(worker_index, epoch);
+    if (counts) ++counts->park_returns;
   }
 }
 } // namespace modern::detail
