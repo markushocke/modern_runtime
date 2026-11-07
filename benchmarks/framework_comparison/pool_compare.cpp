@@ -1,5 +1,5 @@
 // Identical task body and measurement mechanics; only submit() differs.
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED)
 import modern.runtime;
 #endif
 
@@ -78,8 +78,10 @@ options parse(int argc, char** argv) {
   return result;
 }
 
-#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX)
-#if defined(COMPARE_MODERN_FUTEX)
+#if defined(COMPARE_MODERN) || defined(COMPARE_MODERN_INJECTION) || defined(COMPARE_MODERN_CHASE_LEV) || defined(COMPARE_MODERN_PARK) || defined(COMPARE_MODERN_FUTEX) || defined(COMPARE_MODERN_PARK_POOLED)
+#if defined(COMPARE_MODERN_PARK_POOLED)
+constexpr char framework[] = "modern_chase_lev_park_pooled";
+#elif defined(COMPARE_MODERN_FUTEX)
 constexpr char framework[] = "modern_chase_lev_futex";
 #elif defined(COMPARE_MODERN_PARK)
 constexpr char framework[] = "modern_chase_lev_park";
@@ -93,7 +95,15 @@ constexpr char framework[] = "modern_runtime";
 class scheduler {
  public:
   scheduler(std::size_t workers, std::size_t ops)
-#if defined(COMPARE_MODERN_FUTEX)
+#if defined(COMPARE_MODERN_PARK_POOLED)
+    : pool_(modern::thread_pool_options{
+        .workers = workers,
+        .resource = nullptr,
+        .max_pending_tasks = ops + workers + 128,
+        .backend = modern::queue_backend::injection_chase_lev_pooled,
+        .wakeup = modern::worker_wakeup::idle_parking
+      }) {}
+#elif defined(COMPARE_MODERN_FUTEX)
     : pool_(modern::thread_pool_options{
         .workers = workers,
         .resource = nullptr,

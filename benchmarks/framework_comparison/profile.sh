@@ -44,8 +44,8 @@ cmake -S benchmarks/framework_comparison -B "$PROFILE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_ONETBB="$compare_external" \
   -DCOMPARE_WITH_STDEXEC=OFF
 
-names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park)
-targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park)
+names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park modern_chase_lev_park_pooled)
+targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
 if [[ "$(uname -s)" == "Linux" ]]; then
   names+=(modern_chase_lev_futex)
   targets+=(compare_modern_chase_lev_futex)

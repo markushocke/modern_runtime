@@ -166,6 +166,43 @@ def main(folder):
                    f"{label} | {wins} | {p99} |")
     out.extend(["", "Ratios are from matching rounds; large CV limits conclusions.", ""])
 
+    # Isolate node recycling from queue and wakeup policies: both candidates
+    # use identical Chase-Lev queues and atomic idle parking.
+    out.extend([
+        "## Task-node pool A/B: Chase-Lev + atomic parking",
+        "",
+        "Ratio above 1.0x means bounded PMR node recycling increases throughput.",
+        "Both sides share the same queue and wakeup policy.",
+        "",
+        "| Workload | Workers | Pairs | Pooled / unpooled throughput | "
+        "Pool wins | Pooled / unpooled p99 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for workload, workers in configs:
+        speeds, tails = [], []
+        for repeat in sorted({row["run"] for row in rows
+                              if row["workload"] == workload
+                              and int(row["workers"]) == workers}):
+            pool = by_run.get((workload, workers, repeat, "modern_chase_lev_park_pooled"))
+            base = by_run.get((workload, workers, repeat, "modern_chase_lev_park"))
+            if not pool or not base or any(
+                r["valid"] != "1" or r["returncode"] != "0"
+                for r in (pool, base)
+            ):
+                continue
+            throughput = float(base["ops_per_second"])
+            p99 = float(base["p99_ns"])
+            if throughput > 0:
+                speeds.append(float(pool["ops_per_second"]) / throughput)
+            if p99 > 0:
+                tails.append(float(pool["p99_ns"]) / p99)
+        ratio = f"{statistics.median(speeds):.2f}x" if speeds else "n/a"
+        wins = f"{sum(x > 1 for x in speeds)}/{len(speeds)}" if speeds else "n/a"
+        p99ratio = f"{statistics.median(tails):.2f}x" if tails else "n/a"
+        out.append(f"| {workload} | {workers} | {len(speeds)} | "
+                   f"{ratio} | {wins} | {p99ratio} |")
+    out.extend(["", "Measured speedups require complete correctness and stability validation.", ""])
+
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([

@@ -42,7 +42,7 @@ cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_STDEXEC="$COMPARE_STDEXEC" \
   -DCOMPARE_FETCH_DEPS=ON
 
-targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park)
+targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
 if [[ "$(uname -s)" == "Linux" ]]; then
   targets+=(compare_modern_chase_lev_futex)
 fi
@@ -61,7 +61,8 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --binary "modern_runtime=$COMPARE_BUILD_DIR/compare_modern" \
       --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
       --binary "modern_chase_lev=$COMPARE_BUILD_DIR/compare_modern_chase_lev" \
-      --binary "modern_chase_lev_park=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park")
+      --binary "modern_chase_lev_park=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park" \
+      --binary "modern_chase_lev_park_pooled=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_pooled")
 if [[ "$(uname -s)" == "Linux" ]]; then
   args+=(--binary "modern_chase_lev_futex=$COMPARE_BUILD_DIR/compare_modern_chase_lev_futex")
 fi
