@@ -21,6 +21,29 @@ snmalloc via explicit PMR resources; both keep the same unpooled Chase-Lev
 queues and atomic idle parking as the default-PMR baseline. COMPARE_ONLY_RUNTIME=1 is a **diagnostic** A/B/C mode only.
 stdexec is optional and is not strictly equivalent to raw enqueue.
 
+## Current worker-loop optimization
+
+Analysis of the 6-worker diagnostic CSV (100,000 operations, three runs
+per variant) showed 13.6 remote victim probes per mixed-compute task,
+18.2 probes per fanout task and 6.5 probes per **scheduled pipeline
+task**. The first-pass diagnosis suggests too much repeated searching
+for nonexistent work. An opt-in wakeup mode
+\`worker_wakeup::idle_parking_pending_gate\` avoids queue scans when the
+accepted-but-unclaimed count is zero. It retains the original atomic
+parking protocol and seq-cst notification recheck.
+
+The baseline stays untouched; no speedup claim or default change is
+authorized. Before considering this optimization complete:
+
+1. Run all \`pool_gate_chase_lev_*\` tests (1/2/4/8/16 workers, all
+   race/shutdown/allocation-failure cases), and sanitizers.
+2. Compare identical \`modern_chase_lev_park_gated\` and
+   \`modern_chase_lev_park\` with
+   \`bash benchmarks/framework_comparison/run_gate.sh\`.
+3. Compare paired throughput/p99, CV, context switches and diagnostic
+   victim_probes/task. If there is no meaningful advantage, keep the
+   mode experimental and investigate failed steal sweeps instead.
+
 ## Benchmark layers
 
 | Priority | Workload | Real-life analog | Comparability / gate | Status |
@@ -124,7 +147,10 @@ Validation for task-node pooling and original idle-parking backend:
 
 ## Next concrete steps
 
-1. Build the two pinned allocator adapters on the target Clang C++23 host
+1. Validate and measure the opt-in pending-gated wakeup mode, using
+   the test matrix and focused uninstrumented runner above. Do not change
+   the default until both correctness and latency pass.
+2. Build the two pinned allocator adapters on the target Clang C++23 host
    and run short validated smoke tests. Confirm successful dependency fetch,
    no accidental global allocation overrides and correct task results.
 2. Run paired throughput/p99 tests for default PMR vs mimalloc vs snmalloc

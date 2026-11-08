@@ -59,6 +59,42 @@ plus two competitor frameworks).
 The runtime-only mode also works without downloading/building competitor
 dependencies. Do not combine it with `COMPARE_STDEXEC=1`.
 
+## Pending-gated Chase-Lev idle parking (opt-in)
+
+The worker diagnostics found median **13.6 victim probes/task** for mixed
+compute, **18.2/task** for fanout, and **6.5/task** for each scheduled task
+in the staged pipeline (6 workers, 3 diagnostic repetitions, atomic park).
+A new \`modern_chase_lev_park_gated\` variant skips expensive scans only
+when the accepted-but-unclaimed count is zero, rechecking this state with
+seq-cst after registering with the parking notifier. The previous
+\`modern_chase_lev_park\` remains identical and is the A/B baseline.
+
+First validate the candidate's full race/shutdown/cancellation matrix:
+
+\`\`\`sh
+cmake --preset kpi
+cmake --build --preset kpi -j8
+ctest --test-dir build/kpi -R '^pool_gate_chase_lev_' \
+  --output-on-failure --timeout 45
+\`\`\`
+
+Then benchmark **only these two** without diagnostic overhead:
+
+\`\`\`sh
+GATE_WORKERS="4 6" GATE_RUNS=20 \
+  bash benchmarks/framework_comparison/run_gate.sh
+\`\`\`
+
+\`GATE_TASKSET=0-5\` optionally pins processes to logical CPUs 0–5 (the
+six physical cores on the profiled i7-8700K); use an otherwise quiet
+machine and check CPU-governor/frequency metadata before inferring speed.
+\`run_gate.sh\` disables diagnostics, builds only the two relevant adapters,
+and writes a paired throughput/p99 section into \`report.md\`.
+\`diagnose_workers.py\` additionally includes the new \`gated\` variant
+and \`zero_pending_skips_per_task\` to confirm that scans were avoided.
+No speedup is claimed until the integrated build, stress tests and
+un-instrumented A/B have passed.
+
 ## Controlled PMR allocator experiment
 
 The benchmark has two new opt-in *unpooled* Chase-Lev + atomic parking
