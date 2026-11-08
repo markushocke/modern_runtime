@@ -99,6 +99,7 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     ~probe_scope() { current_steal_probe_counter = nullptr; }
   } probes;
   current_steal_probe_counter = counts ? &counts->victim_probes : nullptr;
+  const bool pending_gate = wakeup_ == worker_wakeup::idle_parking_pending_gate;
 
   auto idle_retry = [&]() noexcept
   {
@@ -139,16 +140,26 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
 
   while (true)
   {
-    if (auto task = find_task())
-    {
-      empty_scans = 0;
-      finish_pending_slot();
-      if (counts) ++counts->tasks_executed;
-      task();
-      continue;
-    }
-
+    // A zero pending count means every accepted task has already been
+    // claimed. The queues cannot contain unclaimed work at that point.
+    // Avoid probing N remote deques merely to rediscover that fact.
     auto state = work_state_.load(std::memory_order_acquire);
+    if (!pending_gate || (state & pending_mask) != 0)
+    {
+      if (auto task = find_task())
+      {
+        empty_scans = 0;
+        finish_pending_slot();
+        if (counts) ++counts->tasks_executed;
+        task();
+        continue;
+      }
+      // The scan is not a snapshot: refresh the accepted-but-unclaimed
+      // count before deciding whether to spin or register for parking.
+      state = work_state_.load(std::memory_order_acquire);
+    }
+    else if (counts)
+      ++counts->zero_pending_skips;
     if ((state & stop_bit) != 0 && (state & pending_mask) == 0)
       return;
 
@@ -165,17 +176,23 @@ void thread_pool_state::worker_loop_idle_parking(std::size_t worker_index)
     empty_scans = 0;
     if (counts) ++counts->park_prepares;
     const auto epoch = parking_->prepare(worker_index);
-    // Recheck AFTER becoming visible to notifiers. A producer that
-    // published before registration cannot cause a lost wakeup.
-    if (auto task = find_task())
+    // The original variant scans again after registration. The gated
+    // variant instead uses the seq-cst accepted-task recheck below.
+    // Both paths must cancel registration before processing any work.
+    if (!pending_gate)
     {
-      if (counts) ++counts->park_cancels;
-      parking_->cancel(worker_index);
-      finish_pending_slot();
-      if (counts) ++counts->tasks_executed;
-      task();
-      continue;
+      if (auto task = find_task())
+      {
+        if (counts) ++counts->park_cancels;
+        parking_->cancel(worker_index);
+        finish_pending_slot();
+        if (counts) ++counts->tasks_executed;
+        task();
+        continue;
+      }
     }
+    else if (counts)
+      ++counts->zero_pending_skips;
 
     // Seq-cst must pair with the publisher's acceptance CAS. Otherwise a
     // worker could miss both pending work and the publisher's parked-count
