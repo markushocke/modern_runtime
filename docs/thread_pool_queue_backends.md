@@ -156,6 +156,25 @@ implementation that previously caused the Linux libstdc++ 13 lost-permit
 issue. It still needs sanitizer, repeated idle-wakeup, shutdown and lifecycle
 acceptance before default promotion.
 
+### Pending-count scan gate (experimental)
+
+\`worker_wakeup::idle_parking_pending_gate\` shares the Chase-Lev queue,
+task allocations, and \`std::atomic::wait\` channel of \`idle_parking\`.
+It only changes **when** a worker scans queues. If the atomic accepted-but-
+unclaimed count is zero, no queue can hold pending work, so the worker
+skips the initial scan. After registering as a sleeper, it skips the
+second scan and uses the existing seq-cst pending-state recheck. A
+publisher's seq-cst admission increment and its notify-after-enqueue
+ensure the worker either sees pending work or is visible for notification.
+A pending count above zero still forces the full scan and retry loop;
+a stopping pool with zero pending tasks exits normally.
+
+This is **opt-in**; neither the default semaphore mode nor the existing
+atomic parking, futex, or queue backends change. \`pool_gate_chase_lev_*\`
+tests run the full 1/2/4/8/16 worker race, shutdown, capacity, cancellation
+and allocation-failure matrix. Uninstrumented comparisons must confirm
+both throughput and tail latency before this becomes a default.
+
 ### Linux direct-futex parking experiment
 
 `worker_wakeup::idle_parking_futex` is an additional opt-in Linux-only
