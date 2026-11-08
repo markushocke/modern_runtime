@@ -44,7 +44,7 @@ cmake -S benchmarks/framework_comparison -B "$COMPARE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_ALLOCATORS="$([[ "$COMPARE_ALLOCATORS" == "1" ]] && echo ON || echo OFF)" \
   -DCOMPARE_FETCH_DEPS=ON
 
-targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
+targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled compare_modern_chase_lev_park_gated)
 if [[ "$COMPARE_ALLOCATORS" == "1" ]]; then
   targets+=(compare_modern_chase_lev_park_mimalloc compare_modern_chase_lev_park_snmalloc)
 fi
@@ -67,7 +67,8 @@ args=(--output "$COMPARE_OUTPUT" --cmake-cache "$COMPARE_BUILD_DIR/CMakeCache.tx
       --binary "modern_injection=$COMPARE_BUILD_DIR/compare_modern_injection" \
       --binary "modern_chase_lev=$COMPARE_BUILD_DIR/compare_modern_chase_lev" \
       --binary "modern_chase_lev_park=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park" \
-      --binary "modern_chase_lev_park_pooled=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_pooled")
+      --binary "modern_chase_lev_park_pooled=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_pooled" \
+      --binary "modern_chase_lev_park_gated=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_gated")
 if [[ "$COMPARE_ALLOCATORS" == "1" ]]; then
   args+=(--binary "modern_chase_lev_park_mimalloc=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_mimalloc"
         --binary "modern_chase_lev_park_snmalloc=$COMPARE_BUILD_DIR/compare_modern_chase_lev_park_snmalloc")

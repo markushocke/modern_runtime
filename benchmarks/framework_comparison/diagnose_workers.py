@@ -9,11 +9,12 @@ import sys
 
 FIELDS = (
     "scans", "local_hits", "injected_hits", "steal_hits", "steal_misses",
-    "victim_probes", "pending_retries", "park_prepares", "park_cancels",
+    "victim_probes", "pending_retries", "zero_pending_skips", "park_prepares", "park_cancels",
     "park_waits", "park_returns", "tasks",
 )
 CONFIGS = (
     ("atomic", "compare_modern_chase_lev_park"),
+    ("gated", "compare_modern_chase_lev_park_gated"),
     ("futex", "compare_modern_chase_lev_futex"),
     ("pooled_atomic", "compare_modern_chase_lev_park_pooled"),
 )
@@ -45,6 +46,7 @@ def main():
             "workload", "variant", "workers", "operations", "repeat",
             *FIELDS, "scans_per_task", "victim_probes_per_task",
             "steal_miss_per_task", "pending_retries_per_task",
+            "zero_pending_skips_per_task",
             "park_waits_per_task",
         ]
         writer = csv.DictWriter(stream, fieldnames=columns)
@@ -103,7 +105,7 @@ def main():
                     }
                     for field in (
                         "scans", "victim_probes", "steal_misses",
-                        "pending_retries", "park_waits",
+                        "pending_retries", "park_waits", "zero_pending_skips",
                     ):
                         key = "steal_miss_per_task" if field == "steal_misses" else f"{field}_per_task"
                         row[key] = f"{counts[field] / counts['tasks']:.6f}"

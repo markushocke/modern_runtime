@@ -244,6 +244,43 @@ def main(folder):
                        f"{ratio} | {wins} | {tail} |")
     out.extend(["", "The old pooled-node variant is NOT part of this controlled allocator A/B.", ""])
 
+    # A/B isolates a cheaper idle-pending check: same queues, atomic
+    # parking, task representation, memory resource and workloads.
+    out.extend([
+        "## Pending-count scan gate vs regular idle parking",
+        "",
+        "Ratio above 1.0x means skipping known-empty Chase-Lev scans helps.",
+        "The fast path is experimental; correctness stress tests are required.",
+        "",
+        "| Workload | Workers | Pairs | Gated / original throughput | "
+        "Gated wins | Gated / original p99 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for workload, workers in configs:
+        speeds, tails = [], []
+        for repeat in sorted({row["run"] for row in rows
+                              if row["workload"] == workload
+                              and int(row["workers"]) == workers}):
+            gated = by_run.get((workload, workers, repeat, "modern_chase_lev_park_gated"))
+            original = by_run.get((workload, workers, repeat, "modern_chase_lev_park"))
+            if not gated or not original or any(
+                r["valid"] != "1" or r["returncode"] != "0"
+                for r in (gated, original)
+            ):
+                continue
+            base_speed = float(original["ops_per_second"])
+            base_tail = float(original["p99_ns"])
+            if base_speed > 0:
+                speeds.append(float(gated["ops_per_second"]) / base_speed)
+            if base_tail > 0:
+                tails.append(float(gated["p99_ns"]) / base_tail)
+        ratio = f"{statistics.median(speeds):.2f}x" if speeds else "n/a"
+        wins = f"{sum(x > 1 for x in speeds)}/{len(speeds)}" if speeds else "n/a"
+        p99 = f"{statistics.median(tails):.2f}x" if tails else "n/a"
+        out.append(f"| {workload} | {workers} | {len(speeds)} | "
+                   f"{ratio} | {wins} | {p99} |")
+    out.extend(["", "Use uninstrumented paired runs with stable CPU frequency.", ""])
+
     # Product-relevant cases come first; raw dispatch stays below as a
     # diagnostic. Show competitors even if the runtime-only mode omitted them.
     out.extend([

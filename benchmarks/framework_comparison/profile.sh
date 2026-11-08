@@ -46,8 +46,8 @@ cmake -S benchmarks/framework_comparison -B "$PROFILE_BUILD_DIR" -G Ninja \
   -DCOMPARE_WITH_STDEXEC=OFF \
   -DCOMPARE_WITH_ALLOCATORS="$([[ "$PROFILE_ALLOCATORS" == "1" ]] && echo ON || echo OFF)"
 
-names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park modern_chase_lev_park_pooled)
-targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled)
+names=(modern_runtime modern_injection modern_chase_lev modern_chase_lev_park modern_chase_lev_park_pooled modern_chase_lev_park_gated)
+targets=(compare_modern compare_modern_injection compare_modern_chase_lev compare_modern_chase_lev_park compare_modern_chase_lev_park_pooled compare_modern_chase_lev_park_gated)
 if [[ "$PROFILE_ALLOCATORS" == "1" ]]; then
   names+=(modern_chase_lev_park_mimalloc modern_chase_lev_park_snmalloc)
   targets+=(compare_modern_chase_lev_park_mimalloc compare_modern_chase_lev_park_snmalloc)
