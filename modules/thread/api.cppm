@@ -36,6 +36,7 @@ enum class worker_wakeup
   per_task_semaphore,
   idle_parking,
   idle_parking_futex, // Linux-only alternative to std::atomic::wait.
+  idle_parking_pending_gate, // Experimental: skip empty scans when pending == 0.
 };
 
 // Prefer named options for new users; positional constructor remains compatible.

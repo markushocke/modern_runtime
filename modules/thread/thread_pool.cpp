@@ -193,7 +193,8 @@ void thread_pool_state::start(std::size_t thread_count)
       throw std::invalid_argument("unknown queue_backend");
   }
   if (wakeup_ == worker_wakeup::idle_parking ||
-      wakeup_ == worker_wakeup::idle_parking_futex)
+      wakeup_ == worker_wakeup::idle_parking_futex ||
+      wakeup_ == worker_wakeup::idle_parking_pending_gate)
     parking_ = std::make_unique<worker_parking>(
       thread_count, resource_, wakeup_ == worker_wakeup::idle_parking_futex);
   else if (wakeup_ != worker_wakeup::per_task_semaphore)
@@ -325,6 +326,7 @@ void thread_pool_state::print_worker_diagnostics() const
   for (const auto& item : diagnostics_)
   {
     total.scans += item.scans;
+    total.zero_pending_skips += item.zero_pending_skips;
     total.local_hits += item.local_hits;
     total.injected_hits += item.injected_hits;
     total.steal_hits += item.steal_hits;
@@ -340,6 +342,7 @@ void thread_pool_state::print_worker_diagnostics() const
   std::cerr << "[modern-runtime-worker-diagnostics]"
             << " workers=" << diagnostics_.size()
             << " scans=" << total.scans
+            << " zero_pending_skips=" << total.zero_pending_skips
             << " local_hits=" << total.local_hits
             << " injected_hits=" << total.injected_hits
             << " steal_hits=" << total.steal_hits

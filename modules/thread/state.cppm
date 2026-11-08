@@ -153,6 +153,7 @@ private:
   struct alignas(64) diagnostic_counts
   {
     std::uint64_t scans = 0;
+    std::uint64_t zero_pending_skips = 0;
     std::uint64_t local_hits = 0;
     std::uint64_t injected_hits = 0;
     std::uint64_t steal_hits = 0;

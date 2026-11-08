@@ -57,6 +57,19 @@ if(MODERN_RUNTIME_BUILD_KPI)
           PROPERTIES TIMEOUT 45 LABELS "stress;pool;idlepark;lockfree")
       endforeach()
     endforeach()
+    # Pending gate keeps identical queues and atomic parking, skipping
+    # scans only when no accepted-but-unclaimed work exists. Validate the
+    # complete race matrix before allowing any performance conclusions.
+    foreach(_workers IN ITEMS 1 2 4 8 16)
+      foreach(_scenario IN ITEMS producers local_fanout shutdown_race queue_limit
+                                  exceptions lifecycle allocation_failure
+                                  cancellation_race idle_waves)
+        add_test(NAME pool_gate_chase_lev_${_scenario}_${_workers}
+          COMMAND thread_pool_stress ${_scenario} ${_workers} 10000 chase_lev gate)
+        set_tests_properties(pool_gate_chase_lev_${_scenario}_${_workers}
+          PROPERTIES TIMEOUT 45 LABELS "stress;pool;pendinggate;lockfree")
+      endforeach()
+    endforeach()
     # Linux futex comparison: the same queues and race matrix, but without
     # the userspace spin phase of std::atomic::wait.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
